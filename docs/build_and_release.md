@@ -5,7 +5,7 @@
 Create the primary package and its platform-specific dependencies:
 
 ```bash
-dotnet pack src/ComfyUi.Mcp/ComfyUi.Mcp.csproj \
+dotnet pack src/ComfyUi.WorkflowMcp/ComfyUi.WorkflowMcp.csproj \
   --configuration Release \
   --output artifacts/packages
 ```
@@ -16,14 +16,15 @@ Test the installed package through `dnx`:
 bash scripts/smoke-test-package.sh artifacts/packages
 ```
 
-The smoke test initializes the packaged MCP server and calls `workflow_list` to
-verify that bundled workflows and configuration files resolve correctly.
+The smoke test initializes the packaged MCP server, verifies that workflow,
+configuration, and input directories were not bundled, and checks the empty
+workflow catalog.
 
 ## Version alignment
 
 A release tag must match all three values:
 
-- `<Version>` in `src/ComfyUi.Mcp/ComfyUi.Mcp.csproj`
+- `<Version>` in `src/ComfyUi.WorkflowMcp/ComfyUi.WorkflowMcp.csproj`
 - Top-level `version` in `.mcp/server.json`
 - `packages[0].version` in `.mcp/server.json`
 

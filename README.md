@@ -1,83 +1,144 @@
-# ComfyUI MCP
+# ComfyUI Workflow MCP Server for .NET
 
-A small MCP server for running validated ComfyUI workflows on a local machine or local network.
+[![Release](https://github.com/EntityAdam/comfyui-workflow-mcp/actions/workflows/release.yml/badge.svg)](https://github.com/EntityAdam/comfyui-workflow-mcp/actions/workflows/release.yml)
+[![NuGet](https://img.shields.io/nuget/vpre/ComfyUi.WorkflowMcp.svg)](https://www.nuget.org/packages/ComfyUi.WorkflowMcp)
+[![License: MIT](https://img.shields.io/github/license/EntityAdam/comfyui-workflow-mcp.svg)](LICENSE)
 
-The server deliberately has no asset database, publishing layer, model families, or background lifecycle store. A workflow either waits and returns its first requested media output, or it is submitted to ComfyUI and left there.
+<!-- mcp-name: io.github.EntityAdam/comfyui-workflow-mcp -->
 
-## Install
+Run parameterized ComfyUI workflows for image, audio, and video generation
+through the Model Context Protocol.
 
-```bash
-dotnet tool install --global ComfyUi.Mcp --prerelease
-comfyui-mcp
-```
+## Quickstart
 
-ComfyUI is expected at `http://localhost:8188`. Configure another address with `ComfyMcp__BaseUrl`.
+### 1. Install .NET 10
 
-## Tools
+Install the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0).
+The SDK includes `dnx`, which downloads and runs the pinned NuGet package
+without a permanent installation.
 
-- `setup()` inspects and edits workflow setup, JSON parameter bindings, YAML validation, and per-media defaults.
-- `workflow_list()` lists saved workflows and their validated parameters.
-- `workflow_run()` waits for completion and returns the first output matching the workflow's configured media type.
-- `workflow_run_on_server()` submits to ComfyUI and immediately returns its `prompt_id`.
-- `generate_image()`, `generate_audio()`, and `generate_video()` are friendly wait-and-return wrappers.
-- `comfy_media_upload()` uploads reference media through ComfyUI's `/upload/image` endpoint.
-- `comfy_job_cancel()` best-effort cancels one pending or active prompt.
-- `comfy_queue_list()` lists running and pending work.
-- `comfy_queue_clear()` clears pending work without interrupting the active prompt.
+Start ComfyUI normally and leave it available at `http://localhost:8188`.
 
-## Execution modes
+### 2. Paste the server configuration
 
-`workflow_run()` opens a ComfyUI WebSocket, submits the workflow, waits for the matching prompt to complete, reads `/history/{prompt_id}`, downloads the first output of the configured type through `/view`, and returns it directly in the MCP response.
-
-`workflow_run_on_server()` only posts the rendered workflow to `/prompt`. Completed output is intentionally retrieved through ComfyUI itself, not this MCP server.
-
-## Workflow configuration
-
-Workflow JSON files use typed placeholders:
+Add this server to your MCP configuration:
 
 ```json
 {
-  "6": { "inputs": { "text": "PARAM_PROMPT" } },
-  "3": { "inputs": { "steps": "PARAM_INT_STEPS" } }
+  "mcpServers": {
+    "comfyui": {
+      "command": "dnx",
+      "args": [
+        "ComfyUi.WorkflowMcp@0.0.1-preview5",
+        "--yes",
+        "--",
+        "--stdio"
+      ]
+    }
+  }
 }
 ```
 
-Each workflow may have `configuration/workflows/<workflow-id>.yaml`:
+See [MCP client configuration](docs/mcp-configuration.md) for a complete
+configuration and copy-paste alternatives, including connecting to ComfyUI at
+another URL.
 
-```yaml
-media_type: image
-defaults:
-  steps: 20
-  model: model.safetensors
-allowed_values:
-  sampler: [euler, dpmpp_2m]
-constraints:
-  steps:
-    minimum: 1
-    maximum: 100
-  prompt:
-    pattern: ".+"
-```
+Some clients call the top-level property `servers` instead of `mcpServers`.
+Restart or refresh the MCP client after saving the configuration.
 
-YAML rejects known-invalid node values before submission. Tool-call values override defaults.
+### 3. Let your agent finish setup
 
-Use `setup(operation: "parameterize_workflow", ...)` to edit copied API-format JSON files in place, and `setup(operation: "configure_workflow", ...)` to write YAML validation.
+Ask:
 
-## Configuration
+> Run `setup()` and help me configure ComfyUI Workflow MCP.
 
-- `ComfyMcp__BaseUrl`: ComfyUI URL; default `http://localhost:8188`.
-- `ComfyMcp__ServerUrl`: MCP HTTP URL; default `http://localhost:9001`.
-- `ComfyMcp__WorkflowDirectory`: initial JSON workflow directory.
-- `ComfyMcp__ConfigurationDirectory`: YAML configuration directory.
-- `ComfyMcp__InputRoot`: local path boundary for `comfy_media_upload()`.
+Setup can select the directories used for workflow JSON and YAML configuration,
+parameterize ComfyUI API-format workflow exports, and save a default workflow
+for image, audio, or video generation. ComfyUI may be on the same machine or a
+trusted local network.
 
-The setup tool can persist a different workflow directory and default image, audio, and video workflows in `configuration/settings.yaml`.
+## Setup
 
-## Development
+The package does not include workflow or YAML files. During setup, the agent can:
 
-```bash
-dotnet restore ComfyUi.Mcp.slnx
-dotnet test ComfyUi.Mcp.slnx
-```
+1. Choose or change the workflow JSON directory.
+2. Inspect the configured YAML directory.
+3. Edit a copied ComfyUI API-format JSON workflow and replace configurable node
+   inputs with typed parameters.
+4. Add YAML defaults, allowed values, and constraints for parameters that
+   ComfyUI validates only when a workflow runs.
+5. Save a default workflow for image, audio, or video generation.
 
-See [configuration](docs/configuration.md), [MCP client configuration](docs/mcp-configuration.md), and [running from source](docs/run_from_source.md).
+Source workflow files may be edited directly. They are expected to be copies
+exported from ComfyUI and do not require version-preserving transformations.
+
+## Tools
+
+### Generation
+
+- `generate_image()` runs an image workflow.
+- `generate_audio()` runs an audio workflow.
+- `generate_video()` runs a video workflow.
+- `workflow_list()` lists discovered workflow IDs and their parameters.
+
+Each generation call requires `workflow_id` unless setup has saved a default
+for that media type. If neither is available, the tool recommends running
+`setup()`.
+
+Generation waits for completion by default and returns media for the MCP client
+to display. Set `wait_for_completion` to `false` for fire-and-forget submission;
+the tool queues the workflow on ComfyUI and returns its prompt ID without
+waiting for media. The wait and submit paths are internal APIs, not separate
+MCP tools.
+
+If a workflow produces more than one output, the server returns only the first
+output matching the requested media type.
+
+### ComfyUI controls
+
+- `comfy_media_upload()` uploads an image, audio file, or video through
+  ComfyUI's upload endpoint.
+- `comfy_job_cancel()` attempts to cancel a running job.
+- `comfy_queue_list()` reports running and pending jobs.
+- `comfy_queue_clear()` removes pending jobs from the queue.
+
+There is no MCP-managed asset registry, publishing layer, or output TTL. A
+completed result is returned directly to the client; a fire-and-forget result
+remains a ComfyUI job.
+
+## Input media
+
+Local uploads are limited to `ComfyWorkflowMcp__InputRoot`. Its default is an
+`input` directory beside the executable. The directory is not bundled or
+scanned: the server reads only the exact path supplied to
+`comfy_media_upload()`.
+
+Set `ComfyWorkflowMcp__InputRoot` to another directory when you intentionally
+want to select media stored elsewhere. See [Configuration](docs/configuration.md)
+for details.
+
+## How-to guides
+
+- [Generate audio from text](docs/how-to/text_to_audio.md)
+- [Generate an image from text](docs/how-to/text_to_image.md)
+- [Edit an image](docs/how-to/image_edit.md)
+- [Upscale an image](docs/how-to/image_upscale.md)
+- [Generate video from text](docs/how-to/text_to_video.md)
+- [Interpolate video frames](docs/how-to/video_frame_interpolation.md)
+- [Stop or remove a DNX-launched server](docs/how-to/stop_and_remove_dnx.md)
+
+## More documentation
+
+- [Architecture](docs/architecture.md)
+- [MCP client configuration](docs/mcp-configuration.md)
+- [Configuration](docs/configuration.md)
+- [Run from source](docs/run_from_source.md)
+- [Build and release](docs/build_and_release.md)
+
+Self-contained Windows, Linux, and macOS archives are attached to each
+[GitHub release](https://github.com/EntityAdam/comfyui-workflow-mcp/releases).
+
+## Acknowledgements
+
+Ported technical requirements from
+[artokun/comfyui-mcp](https://github.com/artokun/comfyui-mcp). Thank you!

@@ -4,7 +4,16 @@
 
 ### Changed
 
-- Reduced the MCP surface to setup, workflow execution, image/audio/video
+- Renamed the project, package, executable, namespaces, CI/CD identifiers, and
+  configuration prefix to ComfyUI Workflow MCP.
+- Generation tools now select wait or fire-and-forget execution with
+  `wait_for_completion`; the backing workflow execution paths are no longer
+  exposed as MCP tools.
+- Local media uploads default to a dedicated `input` directory beside the
+  executable instead of the process working directory.
+- README, configuration documentation, architecture notes, and how-to guides
+  now describe the simplified workflow and queue tool surface.
+- Reduced the MCP surface to setup, workflow discovery, image/audio/video
   generation, media upload, cancellation, and queue controls.
 - Workflow execution now has two stateless modes: wait through WebSocket and
   history to return the first requested output, or submit to ComfyUI and return
@@ -14,6 +23,7 @@
 
 ### Removed
 
+- Bundled workflow JSON and YAML configuration.
 - Model families and random family model selection.
 - Durable generation and asset storage, retention, previews, regeneration, and
   publishing.
@@ -90,7 +100,7 @@
 
 ### Changed
 
-- Configuration environment variables use the `ComfyMcp__PropertyName` convention.
+- Configuration environment variables use the `ComfyWorkflowMcp__PropertyName` convention.
 - ComfyUI and MCP server defaults use `localhost`.
 - Publishing now enforces `max_bytes` and rejects oversized source assets.
 

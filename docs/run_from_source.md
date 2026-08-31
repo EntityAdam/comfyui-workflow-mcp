@@ -1,6 +1,6 @@
 # Run from source
 
-Use this path when developing or modifying ComfyUI MCP. For ordinary use,
+Use this path when developing or modifying ComfyUI Workflow MCP. For ordinary use,
 prefer the NuGet package described in the main README.
 
 ## Streamable HTTP
@@ -8,7 +8,7 @@ prefer the NuGet package described in the main README.
 Start ComfyUI on port 8188, then run:
 
 ```bash
-dotnet run --project src/ComfyUi.Mcp
+dotnet run --project src/ComfyUi.WorkflowMcp
 ```
 
 The MCP endpoint is `http://localhost:9001/mcp` and the health endpoint is
@@ -18,7 +18,7 @@ The HTTP server binds to `localhost` by default. To make it reachable from
 other devices on a trusted local network:
 
 ```bash
-dotnet run --project src/ComfyUi.Mcp \
+dotnet run --project src/ComfyUi.WorkflowMcp \
   --no-launch-profile \
   --urls "http://0.0.0.0:9001"
 ```
@@ -41,7 +41,7 @@ Point a local MCP client at the project:
       "args": [
         "run",
         "--project",
-        "/absolute/path/to/src/ComfyUi.Mcp",
+        "/absolute/path/to/src/ComfyUi.WorkflowMcp",
         "--",
         "--stdio"
       ]
@@ -51,6 +51,11 @@ Point a local MCP client at the project:
 ```
 
 Some clients use `servers` rather than `mcpServers` as the top-level property.
+
+The source build does not include workflow JSON or YAML configuration. Run
+`setup()` after connecting, or set `ComfyWorkflowMcp__WorkflowDirectory` and
+`ComfyWorkflowMcp__ConfigurationDirectory` explicitly. Local media defaults to
+an unbundled `input` directory beside the executable.
 
 ## Verify a source build
 
