@@ -4,7 +4,7 @@ using System.Text.Json.Nodes;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 
-namespace ComfyUi.Mcp;
+namespace ComfyUi.WorkflowMcp;
 
 [McpServerToolType]
 public sealed class ComfyTools(
@@ -15,7 +15,7 @@ public sealed class ComfyTools(
     GenerationOptionsService generationOptions,
     WorkflowExecutionService execution)
 {
-    [McpServerTool(Name = "setup"), Description("Inspect or modify ComfyUI MCP workflow setup, workflow YAML validation, media defaults, and PARAM_* bindings.")]
+    [McpServerTool(Name = "setup"), Description("Inspect or modify ComfyUI Workflow MCP workflow setup, workflow YAML validation, media defaults, and PARAM_* bindings.")]
     public object Setup(
         [Description("Operation: status, set_workflow_directory, configure_workflow, parameterize_workflow, or set_default_workflow.")] string operation = "status",
         string? workflow_directory = null,
@@ -67,50 +67,49 @@ public sealed class ComfyTools(
         return new { workflows = catalog, count = catalog.Length, workflow_directory = workflows.DirectoryPath };
     }
 
-    [McpServerTool(Name = "workflow_run"), Description("Run a saved workflow, wait for ComfyUI completion, and return the first output matching its configured media type.")]
-    public Task<CallToolResult> WorkflowRun(string workflow_id, JsonObject? options = null, CancellationToken cancellationToken = default) =>
-        Run(workflow_id, options ?? [], null, cancellationToken);
-
-    [McpServerTool(Name = "workflow_run_on_server"), Description("Submit a saved workflow to ComfyUI and return immediately without tracking or retrieving its output.")]
-    public async Task<object> WorkflowRunOnServer(string workflow_id, JsonObject? options = null, CancellationToken cancellationToken = default)
-    {
-        try
-        {
-            var resolved = generationOptions.Resolve(workflow_id, options ?? []);
-            var rendered = workflows.RenderResolved(workflow_id, resolved.Values);
-            var result = await execution.SubmitAsync(rendered, cancellationToken);
-            return new { submitted = true, prompt_id = result.PromptId, queue_number = result.QueueNumber, workflow_id };
-        }
-        catch (Exception ex) when (!cancellationToken.IsCancellationRequested) { return new { submitted = false, error = ex.Message }; }
-    }
-
     [McpServerTool(Name = "generate_image"), Description("Run an image workflow, wait for completion, and display its first image output.")]
-    public Task<CallToolResult> GenerateImage(string prompt, string? workflow_id = null, JsonObject? options = null, CancellationToken cancellationToken = default)
+    public Task<CallToolResult> GenerateImage(
+        string prompt,
+        string? workflow_id = null,
+        JsonObject? options = null,
+        [Description("Wait for the first image output when true; submit to ComfyUI and return immediately when false.")] bool wait_for_completion = true,
+        CancellationToken cancellationToken = default)
     {
         var values = options?.DeepClone().AsObject() ?? [];
         values["prompt"] = prompt;
-        return RunGenerated("image", workflow_id, values, cancellationToken);
+        return RunGenerated("image", workflow_id, values, wait_for_completion, cancellationToken);
     }
 
     [McpServerTool(Name = "generate_audio"), Description("Run an audio workflow, wait for completion, and return its first audio output.")]
-    public Task<CallToolResult> GenerateAudio(string tags, string lyrics, string? workflow_id = null, JsonObject? options = null, CancellationToken cancellationToken = default)
+    public Task<CallToolResult> GenerateAudio(
+        string tags,
+        string lyrics,
+        string? workflow_id = null,
+        JsonObject? options = null,
+        [Description("Wait for the first audio output when true; submit to ComfyUI and return immediately when false.")] bool wait_for_completion = true,
+        CancellationToken cancellationToken = default)
     {
         var values = options?.DeepClone().AsObject() ?? [];
         values["tags"] = tags;
         values["lyrics"] = lyrics;
-        return RunGenerated("audio", workflow_id, values, cancellationToken);
+        return RunGenerated("audio", workflow_id, values, wait_for_completion, cancellationToken);
     }
 
     [McpServerTool(Name = "generate_video"), Description("Run a video workflow, wait for completion, and return its first video output.")]
-    public Task<CallToolResult> GenerateVideo(string prompt, string? workflow_id = null, JsonObject? options = null, CancellationToken cancellationToken = default)
+    public Task<CallToolResult> GenerateVideo(
+        string prompt,
+        string? workflow_id = null,
+        JsonObject? options = null,
+        [Description("Wait for the first video output when true; submit to ComfyUI and return immediately when false.")] bool wait_for_completion = true,
+        CancellationToken cancellationToken = default)
     {
         var values = options?.DeepClone().AsObject() ?? [];
         values["prompt"] = prompt;
-        return RunGenerated("video", workflow_id, values, cancellationToken);
+        return RunGenerated("video", workflow_id, values, wait_for_completion, cancellationToken);
     }
 
     [McpServerTool(Name = "comfy_media_upload"), Description("Upload a server-accessible image, audio, or video file through ComfyUI's upload endpoint.")]
-    public async Task<object> ComfyMediaUpload(string file_path, string? filename = null, string? subfolder = "comfyui-mcp", bool overwrite = false, CancellationToken cancellationToken = default)
+    public async Task<object> ComfyMediaUpload(string file_path, string? filename = null, string? subfolder = "comfyui-workflow-mcp", bool overwrite = false, CancellationToken cancellationToken = default)
     {
         try
         {
@@ -172,10 +171,74 @@ public sealed class ComfyTools(
         catch (Exception ex) when (!cancellationToken.IsCancellationRequested) { return Error(ex.Message); }
     }
 
-    private Task<CallToolResult> RunGenerated(string mediaType, string? workflowId, JsonObject values, CancellationToken cancellationToken)
+    private Task<CallToolResult> RunGenerated(
+        string mediaType,
+        string? workflowId,
+        JsonObject values,
+        bool waitForCompletion,
+        CancellationToken cancellationToken)
     {
-        try { return Run(ResolveWorkflowId(mediaType, workflowId), values, mediaType, cancellationToken); }
+        try
+        {
+            var resolvedWorkflowId = ResolveWorkflowId(mediaType, workflowId);
+            return waitForCompletion
+                ? Run(resolvedWorkflowId, values, mediaType, cancellationToken)
+                : Submit(resolvedWorkflowId, values, mediaType, cancellationToken);
+        }
         catch (Exception ex) { return Task.FromResult(Error(ex.Message)); }
+    }
+
+    private async Task<CallToolResult> Submit(
+        string workflowId,
+        JsonObject values,
+        string requestedMediaType,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var resolved = generationOptions.Resolve(workflowId, values);
+            if (resolved.MediaType is not null &&
+                !string.Equals(
+                    resolved.MediaType,
+                    requestedMediaType,
+                    StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException(
+                    $"Workflow '{workflowId}' is configured for {resolved.MediaType}, not {requestedMediaType}.");
+            var rendered = workflows.RenderResolved(workflowId, resolved.Values);
+            var submitted = await execution.SubmitAsync(rendered, cancellationToken);
+            return new CallToolResult
+            {
+                StructuredContent = JsonSerializer.SerializeToElement(new
+                {
+                    submitted = true,
+                    prompt_id = submitted.PromptId,
+                    queue_number = submitted.QueueNumber,
+                    workflow_id = workflowId
+                }),
+                Content =
+                [
+                    new TextContentBlock
+                    {
+                        Text = $"Submitted workflow '{workflowId}' as prompt {submitted.PromptId} without waiting for output."
+                    }
+                ]
+            };
+        }
+        catch (GenerationParameterException ex)
+        {
+            return Error(
+                ex.Message,
+                new JsonObject
+                {
+                    ["parameter"] = ex.Parameter,
+                    ["allowed_values"] = new JsonArray(
+                        ex.AllowedValues.Select(value => JsonValue.Create(value)).ToArray())
+                });
+        }
+        catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            return Error(ex.Message);
+        }
     }
 
     private string ResolveWorkflowId(string mediaType, string? workflowId) =>

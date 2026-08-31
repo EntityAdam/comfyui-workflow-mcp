@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="src/ComfyUi.WorkflowMcp/ComfyUi.WorkflowMcp.csproj" />
+  <Project Path="tests/ComfyUi.WorkflowMcp.Tests/ComfyUi.WorkflowMcp.Tests.csproj" />
+</Solution>

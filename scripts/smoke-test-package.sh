@@ -18,18 +18,18 @@ cleanup() {
 }
 trap cleanup EXIT
 
-if ! compgen -G "$package_directory/ComfyUi.Mcp.*.nupkg" >/dev/null; then
-  dotnet pack "$repository_root/src/ComfyUi.Mcp/ComfyUi.Mcp.csproj" \
+if ! compgen -G "$package_directory/ComfyUi.WorkflowMcp.*.nupkg" >/dev/null; then
+  dotnet pack "$repository_root/src/ComfyUi.WorkflowMcp/ComfyUi.WorkflowMcp.csproj" \
     --configuration Release \
     --output "$package_directory"
 fi
 
 version="$(
-  dotnet msbuild "$repository_root/src/ComfyUi.Mcp/ComfyUi.Mcp.csproj" \
+  dotnet msbuild "$repository_root/src/ComfyUi.WorkflowMcp/ComfyUi.WorkflowMcp.csproj" \
     -nologo \
     -getProperty:Version
 )"
-main_package="$package_directory/ComfyUi.Mcp.$version.nupkg"
+main_package="$package_directory/ComfyUi.WorkflowMcp.$version.nupkg"
 
 test -f "$main_package"
 unzip -l "$main_package" | grep '.mcp/server.json' >/dev/null
@@ -47,10 +47,12 @@ case "$(uname -s)-$(uname -m)" in
     ;;
 esac
 
-runtime_package="$package_directory/ComfyUi.Mcp.$runtime_identifier.$version.nupkg"
+runtime_package="$package_directory/ComfyUi.WorkflowMcp.$runtime_identifier.$version.nupkg"
 test -f "$runtime_package"
-unzip -l "$runtime_package" | grep 'workflows/image_flux2.json' >/dev/null
-unzip -l "$runtime_package" | grep 'configuration/workflows/image_flux2.yaml' >/dev/null
+if unzip -l "$runtime_package" | grep -E ' (workflows|configuration|input)/' >/dev/null; then
+  echo "Runtime package unexpectedly contains bundled workflows, configuration, or input media." >&2
+  exit 1
+fi
 
 DOTNET_CLI_HOME="$test_home/dotnet" \
 NUGET_PACKAGES="$test_home/packages" \
@@ -60,13 +62,14 @@ python3 - <<'PY'
 import json
 import os
 import select
+import signal
 import subprocess
 import sys
 import time
 
 command = [
     "dnx",
-    f"ComfyUi.Mcp@{os.environ['COMFY_MCP_PACKAGE_VERSION']}",
+    f"ComfyUi.WorkflowMcp@{os.environ['COMFY_MCP_PACKAGE_VERSION']}",
     "--yes",
     "--no-http-cache",
     "--verbosity",
@@ -83,6 +86,7 @@ process = subprocess.Popen(
     stderr=subprocess.PIPE,
     text=True,
     bufsize=1,
+    start_new_session=True,
 )
 request = {
     "jsonrpc": "2.0",
@@ -148,19 +152,29 @@ process.stdin.write(
 process.stdin.flush()
 workflow_response = read_response(2)
 
-process.terminate()
+try:
+    os.killpg(process.pid, signal.SIGTERM)
+except ProcessLookupError:
+    pass
 try:
     process.wait(timeout=5)
 except subprocess.TimeoutExpired:
-    process.kill()
+    os.killpg(process.pid, signal.SIGKILL)
     process.wait()
 
-if workflow_response is None or "image_flux2" not in json.dumps(workflow_response):
+result = workflow_response.get("result", {}) if workflow_response is not None else {}
+structured = result.get("structuredContent")
+if structured is None:
+    try:
+        structured = json.loads(result["content"][0]["text"])
+    except (KeyError, IndexError, TypeError, json.JSONDecodeError):
+        structured = None
+if not isinstance(structured, dict) or structured.get("count") != 0:
     stderr = process.stderr.read() if process.stderr is not None else ""
     if stdout_diagnostics:
         print("\n".join(stdout_diagnostics), file=sys.stderr)
     print(stderr, file=sys.stderr)
     raise SystemExit(
-        f"Packaged MCP server could not read bundled workflows: {workflow_response}"
+        f"Packaged MCP server did not report an empty workflow catalog: {workflow_response}"
     )
 PY

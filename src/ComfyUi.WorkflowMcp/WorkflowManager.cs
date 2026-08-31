@@ -3,7 +3,7 @@ using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using System.Globalization;
 
-namespace ComfyUi.Mcp;
+namespace ComfyUi.WorkflowMcp;
 
 public sealed partial class WorkflowManager(IConfiguration configuration, TimeProvider? timeProvider = null)
 {

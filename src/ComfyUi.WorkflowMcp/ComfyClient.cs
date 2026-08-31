@@ -2,7 +2,7 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json.Nodes;
 
-namespace ComfyUi.Mcp;
+namespace ComfyUi.WorkflowMcp;
 
 public sealed class ComfyClient(HttpClient httpClient, IConfiguration configuration)
 {
@@ -96,9 +96,17 @@ public sealed class ComfyClient(HttpClient httpClient, IConfiguration configurat
 
     public static string MimeFor(string filename) => Path.GetExtension(filename).ToLowerInvariant() switch
     {
-        ".png" => "image/png", ".jpg" or ".jpeg" => "image/jpeg", ".webp" => "image/webp", ".gif" => "image/gif",
-        ".wav" => "audio/wav", ".mp3" => "audio/mpeg", ".flac" => "audio/flac", ".ogg" => "audio/ogg",
-        ".mp4" => "video/mp4", ".webm" => "video/webm", ".mov" => "video/quicktime",
+        ".png" => "image/png",
+        ".jpg" or ".jpeg" => "image/jpeg",
+        ".webp" => "image/webp",
+        ".gif" => "image/gif",
+        ".wav" => "audio/wav",
+        ".mp3" => "audio/mpeg",
+        ".flac" => "audio/flac",
+        ".ogg" => "audio/ogg",
+        ".mp4" => "video/mp4",
+        ".webm" => "video/webm",
+        ".mov" => "video/quicktime",
         _ => "application/octet-stream"
     };
 }

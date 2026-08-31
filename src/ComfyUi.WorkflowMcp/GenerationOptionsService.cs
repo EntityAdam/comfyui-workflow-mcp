@@ -1,6 +1,6 @@
 using System.Text.Json.Nodes;
 
-namespace ComfyUi.Mcp;
+namespace ComfyUi.WorkflowMcp;
 
 public sealed class GenerationParameterException(
     string parameter,

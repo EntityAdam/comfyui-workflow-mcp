@@ -1,6 +1,6 @@
 using Microsoft.Extensions.Configuration;
 
-namespace ComfyUi.Mcp.Tests;
+namespace ComfyUi.WorkflowMcp.Tests;
 
 internal static class TestConfiguration
 {

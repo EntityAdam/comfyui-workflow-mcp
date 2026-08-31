@@ -1,7 +1,7 @@
 using System.Text.Json.Nodes;
 using Xunit;
 
-namespace ComfyUi.Mcp.Tests;
+namespace ComfyUi.WorkflowMcp.Tests;
 
 public sealed class WorkflowExecutionTests
 {
@@ -11,7 +11,7 @@ public sealed class WorkflowExecutionTests
         await using var server = new FakeComfyUiServer();
         await server.StartAsync(TestContext.Current.CancellationToken);
         using var http = new HttpClient();
-        var client = new ComfyClient(http, TestConfiguration.Create(("ComfyMcp:BaseUrl", server.BaseUrl)));
+        var client = new ComfyClient(http, TestConfiguration.Create(("ComfyWorkflowMcp:BaseUrl", server.BaseUrl)));
         var service = new WorkflowExecutionService(client);
 
         var completed = await service.RunAsync(new JsonObject { ["1"] = new JsonObject() }, "image", TestContext.Current.CancellationToken);
@@ -29,7 +29,7 @@ public sealed class WorkflowExecutionTests
         await using var server = new FakeComfyUiServer();
         await server.StartAsync(TestContext.Current.CancellationToken);
         using var http = new HttpClient();
-        var client = new ComfyClient(http, TestConfiguration.Create(("ComfyMcp:BaseUrl", server.BaseUrl)));
+        var client = new ComfyClient(http, TestConfiguration.Create(("ComfyWorkflowMcp:BaseUrl", server.BaseUrl)));
         var service = new WorkflowExecutionService(client);
 
         var submitted = await service.SubmitAsync(new JsonObject { ["1"] = new JsonObject() }, TestContext.Current.CancellationToken);

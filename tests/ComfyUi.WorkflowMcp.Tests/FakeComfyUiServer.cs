@@ -10,7 +10,7 @@ using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 
-namespace ComfyUi.Mcp.Tests;
+namespace ComfyUi.WorkflowMcp.Tests;
 
 internal enum FakeGenerationOutcome
 {

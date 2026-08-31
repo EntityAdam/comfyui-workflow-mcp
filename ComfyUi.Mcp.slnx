@@ -1,4 +1,0 @@
-<Solution>
-  <Project Path="src/ComfyUi.Mcp/ComfyUi.Mcp.csproj" />
-  <Project Path="tests/ComfyUi.Mcp.Tests/ComfyUi.Mcp.Tests.csproj" />
-</Solution>

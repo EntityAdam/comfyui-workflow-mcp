@@ -1,0 +1,121 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.classify.outputs.code }}
+      docs: ${{ steps.classify.outputs.docs }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Classify changed files
+        id: classify
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BEFORE_SHA: ${{ github.event.before }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+            base="$PR_BASE_SHA"
+          else
+            base="$BEFORE_SHA"
+          fi
+
+          if [[ -z "$base" || "$base" =~ ^0+$ ]]; then
+            base="$(git hash-object -t tree /dev/null)"
+          fi
+
+          code=false
+          docs=false
+          while IFS= read -r path; do
+            if [[ "$path" == "README.md" || "$path" == docs/* ]]; then
+              docs=true
+            else
+              code=true
+            fi
+          done < <(git diff --name-only "$base" "$GITHUB_SHA")
+
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          echo "docs=$docs" >> "$GITHUB_OUTPUT"
+
+  build-test-package:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.201
+
+      - name: Restore
+        run: dotnet restore ComfyUi.WorkflowMcp.slnx
+
+      - name: Verify formatting
+        run: dotnet format ComfyUi.WorkflowMcp.slnx --verify-no-changes --no-restore
+
+      - name: Build
+        run: dotnet build ComfyUi.WorkflowMcp.slnx --configuration Release --no-restore
+
+      - name: Test
+        run: dotnet test ComfyUi.WorkflowMcp.slnx --configuration Release --no-build --no-restore
+
+      - name: Smoke-test published HTTP server
+        run: bash scripts/smoke-test-publish.sh
+
+      - name: Pack
+        run: dotnet pack src/ComfyUi.WorkflowMcp/ComfyUi.WorkflowMcp.csproj --configuration Release --no-restore --output artifacts/packages
+
+      - name: Smoke-test NuGet MCP package
+        run: bash scripts/smoke-test-package.sh artifacts/packages
+
+      - name: Upload packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: packages
+          path: artifacts/packages/*.nupkg
+
+  docs:
+    needs: changes
+    if: needs.changes.outputs.docs == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Validate documentation
+        run: bash scripts/validate-docs.sh
+
+  gate:
+    name: Required
+    if: always()
+    needs: [changes, build-test-package, docs]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require successful applicable checks
+        env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          BUILD_RESULT: ${{ needs.build-test-package.result }}
+          DOCS_RESULT: ${{ needs.docs.result }}
+        run: |
+          test "$CHANGES_RESULT" = "success"
+          [[ "$BUILD_RESULT" == "success" || "$BUILD_RESULT" == "skipped" ]]
+          [[ "$DOCS_RESULT" == "success" || "$DOCS_RESULT" == "skipped" ]]

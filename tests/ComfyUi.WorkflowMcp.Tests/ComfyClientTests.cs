@@ -3,7 +3,7 @@ using System.Text;
 using System.Text.Json.Nodes;
 using Xunit;
 
-namespace ComfyUi.Mcp.Tests;
+namespace ComfyUi.WorkflowMcp.Tests;
 
 public sealed class ComfyClientTests
 {
@@ -72,7 +72,7 @@ public sealed class ComfyClientTests
     }
 
     private static ComfyClient Create(HttpClient http) =>
-        new(http, TestConfiguration.Create(("ComfyMcp:BaseUrl", "http://comfy.test:8188")));
+        new(http, TestConfiguration.Create(("ComfyWorkflowMcp:BaseUrl", "http://comfy.test:8188")));
 
     private static HttpResponseMessage Json(string value) => new(HttpStatusCode.OK)
     {

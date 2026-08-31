@@ -1,7 +1,7 @@
 using System.Text.Json.Nodes;
 using Xunit;
 
-namespace ComfyUi.Mcp.Tests;
+namespace ComfyUi.WorkflowMcp.Tests;
 
 public sealed class WorkflowConfigurationTests
 {
@@ -29,8 +29,8 @@ public sealed class WorkflowConfigurationTests
                 maximum: 20
             """);
         var config = TestConfiguration.Create(
-            ("ComfyMcp:WorkflowDirectory", workflowDirectory),
-            ("ComfyMcp:ConfigurationDirectory", configurationDirectory));
+            ("ComfyWorkflowMcp:WorkflowDirectory", workflowDirectory),
+            ("ComfyWorkflowMcp:ConfigurationDirectory", configurationDirectory));
         var manager = new WorkflowManager(config);
         var options = new GenerationOptionsService(manager, new WorkflowConfigurationManager(config));
 
@@ -51,8 +51,8 @@ public sealed class WorkflowConfigurationTests
         File.WriteAllText(Path.Combine(workflowDirectory, "copied.json"),
             """{"7":{"class_type":"KSampler","inputs":{"steps":20}}}""");
         var config = TestConfiguration.Create(
-            ("ComfyMcp:WorkflowDirectory", workflowDirectory),
-            ("ComfyMcp:ConfigurationDirectory", Path.Combine(temp.Path, "configuration")));
+            ("ComfyWorkflowMcp:WorkflowDirectory", workflowDirectory),
+            ("ComfyWorkflowMcp:ConfigurationDirectory", Path.Combine(temp.Path, "configuration")));
         var workflows = new WorkflowManager(config);
         var manager = new WorkflowConfigurationManager(config);
 

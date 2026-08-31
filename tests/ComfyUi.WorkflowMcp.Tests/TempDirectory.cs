@@ -1,4 +1,4 @@
-namespace ComfyUi.Mcp.Tests;
+namespace ComfyUi.WorkflowMcp.Tests;
 
 internal sealed class TempDirectory : IDisposable
 {

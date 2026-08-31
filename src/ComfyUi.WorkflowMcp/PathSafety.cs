@@ -1,4 +1,4 @@
-namespace ComfyUi.Mcp;
+namespace ComfyUi.WorkflowMcp;
 
 public static class PathSafety
 {

@@ -1,0 +1,185 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Verify release commit is on main
+        shell: bash
+        run: |
+          git fetch origin main
+          release_commit="$(git rev-list -n 1 "$GITHUB_SHA")"
+          git merge-base --is-ancestor "$release_commit" origin/main
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.201
+
+      - name: Verify release versions
+        shell: bash
+        run: |
+          tag_version="${GITHUB_REF_NAME#v}"
+          project_version="$(dotnet msbuild src/ComfyUi.WorkflowMcp/ComfyUi.WorkflowMcp.csproj -nologo -getProperty:Version)"
+          manifest_version="$(jq -r .version .mcp/server.json)"
+          package_version="$(jq -r '.packages[0].version' .mcp/server.json)"
+          test "$tag_version" = "$project_version"
+          test "$tag_version" = "$manifest_version"
+          test "$tag_version" = "$package_version"
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Verify formatting
+        run: dotnet format ComfyUi.WorkflowMcp.slnx --verify-no-changes --no-restore
+
+      - name: Test
+        run: dotnet test --configuration Release --no-restore
+
+      - name: Smoke-test published HTTP server
+        run: bash scripts/smoke-test-publish.sh
+
+      - name: Pack
+        run: dotnet pack src/ComfyUi.WorkflowMcp/ComfyUi.WorkflowMcp.csproj --configuration Release --no-restore --output artifacts/packages
+
+      - name: Smoke-test NuGet MCP package
+        run: bash scripts/smoke-test-package.sh artifacts/packages
+
+      - name: Upload packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: packages
+          path: artifacts/packages/*.nupkg
+
+  executables:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      matrix:
+        runtime:
+          - win-x64
+          - win-arm64
+          - linux-x64
+          - linux-arm64
+          - linux-musl-x64
+          - osx-x64
+          - osx-arm64
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.201
+
+      - name: Publish self-contained executable
+        run: >
+          dotnet publish src/ComfyUi.WorkflowMcp/ComfyUi.WorkflowMcp.csproj
+          --configuration Release
+          --runtime ${{ matrix.runtime }}
+          --self-contained
+          -p:PublishSingleFile=true
+          -p:DebugType=None
+          -p:DebugSymbols=false
+          --output artifacts/publish
+
+      - name: Create release archive
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          if [[ "${{ matrix.runtime }}" == win-* ]]; then
+            (cd artifacts/publish && zip -qr "../comfyui-workflow-mcp-$version-${{ matrix.runtime }}.zip" .)
+          else
+            tar -C artifacts/publish -czf "artifacts/comfyui-workflow-mcp-$version-${{ matrix.runtime }}.tar.gz" .
+          fi
+
+      - name: Upload executable archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: executable-${{ matrix.runtime }}
+          path: artifacts/comfyui-workflow-mcp-*
+
+  publish:
+    needs: [package, executables]
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Log in to NuGet with trusted publishing
+        id: nuget_login
+        uses: NuGet/login@v1
+        with:
+          user: ${{ vars.NUGET_USER }}
+
+      - name: Publish packages to NuGet.org
+        shell: bash
+        run: |
+          for package in artifacts/*.nupkg; do
+            dotnet nuget push "$package" \
+              --api-key "$NUGET_API_KEY" \
+              --source https://api.nuget.org/v3/index.json \
+              --skip-duplicate
+          done
+        env:
+          NUGET_API_KEY: ${{ steps.nuget_login.outputs.NUGET_API_KEY }}
+
+      - name: Wait for package availability
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          url="https://api.nuget.org/v3-flatcontainer/comfyui.workflowmcp/$version/readme"
+          for attempt in {1..30}; do
+            if curl --fail --silent "$url" >/dev/null; then
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "NuGet package did not become available: $url" >&2
+          exit 1
+
+      - name: Install MCP Registry publisher
+        run: |
+          curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_linux_amd64.tar.gz" |
+            tar xz mcp-publisher
+
+      - name: Publish to the official MCP Registry
+        run: |
+          ./mcp-publisher login github-oidc
+          ./mcp-publisher publish .mcp/server.json
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release create "$GITHUB_REF_NAME"
+          artifacts/*.nupkg
+          artifacts/*.zip
+          artifacts/*.tar.gz
+          --generate-notes
+          --verify-tag

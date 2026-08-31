@@ -3,10 +3,10 @@ using System.Net.Http.Json;
 using System.Text.Json.Nodes;
 using Xunit;
 
-namespace ComfyUi.Mcp.Tests;
+namespace ComfyUi.WorkflowMcp.Tests;
 
-public sealed class McpServerIntegrationTests(ComfyMcpApplicationFactory factory)
-    : IClassFixture<ComfyMcpApplicationFactory>, IDisposable
+public sealed class McpServerIntegrationTests(ComfyWorkflowMcpApplicationFactory factory)
+    : IClassFixture<ComfyWorkflowMcpApplicationFactory>, IDisposable
 {
     private readonly HttpClient _client = factory.CreateClient();
     public void Dispose() => _client.Dispose();
@@ -27,11 +27,30 @@ public sealed class McpServerIntegrationTests(ComfyMcpApplicationFactory factory
         var names = response["result"]!["tools"]!.AsArray().Select(tool => tool!["name"]!.ToString()).ToArray();
         string[] expected =
         [
-            "setup", "workflow_list", "workflow_run", "workflow_run_on_server",
-            "generate_image", "generate_audio", "generate_video",
+            "setup", "workflow_list", "generate_image", "generate_audio", "generate_video",
             "comfy_media_upload", "comfy_job_cancel", "comfy_queue_list", "comfy_queue_clear"
         ];
         Assert.Equal(expected.Order(StringComparer.Ordinal), names);
+    }
+
+    [Fact]
+    public async Task GenerationToolsExposeCompletionChoiceWithoutWorkflowRunTools()
+    {
+        var response = await SendMcpAsync(
+            """{"jsonrpc":"2.0","id":4,"method":"tools/list","params":{}}""");
+        var tools = response["result"]!["tools"]!.AsArray();
+
+        Assert.DoesNotContain(
+            tools,
+            tool => tool!["name"]!.ToString() is
+                "workflow_run" or "workflow_run_on_server");
+        foreach (var name in new[] { "generate_image", "generate_audio", "generate_video" })
+        {
+            var tool = tools.Single(item => item!["name"]!.ToString() == name)!;
+            Assert.True(
+                tool["inputSchema"]!["properties"]!["wait_for_completion"]!["default"]!
+                    .GetValue<bool>());
+        }
     }
 
     [Fact]

@@ -1,10 +1,10 @@
 using Microsoft.Extensions.Configuration;
 
-namespace ComfyUi.Mcp;
+namespace ComfyUi.WorkflowMcp;
 
 public static class ComfyConfiguration
 {
-    public const string SectionName = "ComfyMcp";
+    public const string SectionName = "ComfyWorkflowMcp";
     public const string BaseUrlKey = $"{SectionName}:BaseUrl";
     public const string ServerUrlKey = $"{SectionName}:ServerUrl";
     public const string WorkflowDirectoryKey = $"{SectionName}:WorkflowDirectory";
@@ -30,5 +30,6 @@ public static class ComfyConfiguration
     }
 
     public static string InputRoot(this IConfiguration configuration) =>
-        Path.GetFullPath(configuration[InputRootKey] ?? Directory.GetCurrentDirectory());
+        Path.GetFullPath(configuration[InputRootKey]
+            ?? Path.Combine(AppContext.BaseDirectory, "input"));
 }

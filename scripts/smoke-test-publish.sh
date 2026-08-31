@@ -15,13 +15,14 @@ cleanup() {
 }
 trap cleanup EXIT
 
-dotnet publish "$repository_root/src/ComfyUi.Mcp/ComfyUi.Mcp.csproj" \
+dotnet publish "$repository_root/src/ComfyUi.WorkflowMcp/ComfyUi.WorkflowMcp.csproj" \
   --configuration Release \
   --no-restore \
   --output "$publish_directory"
 
-test -f "$publish_directory/configuration/settings.yaml"
-test -f "$publish_directory/configuration/workflows/image_flux2.yaml"
+test ! -e "$publish_directory/workflows"
+test ! -e "$publish_directory/configuration"
+test ! -e "$publish_directory/input"
 
 port="$(python3 - <<'PY'
 import socket
@@ -34,9 +35,9 @@ server_url="http://localhost:$port"
 
 (
   cd "$publish_directory"
-  ComfyMcp__BaseUrl="http://comfyui.invalid:8188" \
-  ComfyMcp__ServerUrl="$server_url" \
-  dotnet ComfyUi.Mcp.dll >"$server_log" 2>&1
+  ComfyWorkflowMcp__BaseUrl="http://comfyui.invalid:8188" \
+  ComfyWorkflowMcp__ServerUrl="$server_url" \
+  dotnet ComfyUi.WorkflowMcp.dll >"$server_log" 2>&1
 ) &
 server_pid="$!"
 

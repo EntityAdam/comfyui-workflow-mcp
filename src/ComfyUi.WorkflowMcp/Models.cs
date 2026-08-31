@@ -1,6 +1,6 @@
 using System.Text.Json.Nodes;
 
-namespace ComfyUi.Mcp;
+namespace ComfyUi.WorkflowMcp;
 
 public sealed record WorkflowParameter(string Name, Type Type, string Description, List<WorkflowBinding> Bindings);
 public sealed record WorkflowBinding(string NodeId, string InputName, string? Token = null);

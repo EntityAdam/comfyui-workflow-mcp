@@ -1,4 +1,4 @@
-using ComfyUi.Mcp;
+using ComfyUi.WorkflowMcp;
 using Microsoft.Extensions.Http.Resilience;
 
 var builder = WebApplication.CreateBuilder(args);

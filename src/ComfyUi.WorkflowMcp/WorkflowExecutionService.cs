@@ -2,7 +2,7 @@ using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json.Nodes;
 
-namespace ComfyUi.Mcp;
+namespace ComfyUi.WorkflowMcp;
 
 public sealed class WorkflowExecutionService(ComfyClient client)
 {

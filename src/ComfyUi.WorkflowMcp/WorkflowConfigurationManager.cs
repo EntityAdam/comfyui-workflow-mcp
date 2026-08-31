@@ -3,7 +3,7 @@ using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using YamlDotNet.Serialization;
 
-namespace ComfyUi.Mcp;
+namespace ComfyUi.WorkflowMcp;
 
 public sealed partial class WorkflowConfigurationManager(IConfiguration configuration)
 {
