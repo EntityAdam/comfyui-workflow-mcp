@@ -27,7 +27,7 @@ public sealed class McpServerIntegrationTests(ComfyWorkflowMcpApplicationFactory
         var names = response["result"]!["tools"]!.AsArray().Select(tool => tool!["name"]!.ToString()).ToArray();
         string[] expected =
         [
-            "setup", "workflow_list", "generate_image", "generate_audio", "generate_video",
+            "setup", "workflow_list", "workflow_get_options", "generate_image", "generate_audio", "generate_video",
             "comfy_media_upload", "comfy_job_cancel", "comfy_queue_list", "comfy_queue_clear"
         ];
         Assert.Equal(expected.Order(StringComparer.Ordinal), names);
@@ -62,6 +62,20 @@ public sealed class McpServerIntegrationTests(ComfyWorkflowMcpApplicationFactory
         var structured = response["result"]!["structuredContent"] as JsonObject
             ?? JsonNode.Parse(response["result"]!["content"]![0]!["text"]!.ToString())!.AsObject();
         Assert.True(structured["count"]!.GetValue<int>() > 0);
+    }
+
+    [Fact]
+    public async Task WorkflowGetOptionsReturnsYamlAsStructuredData()
+    {
+        var response = await SendMcpAsync(
+            """{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"workflow_get_options","arguments":{"workflow_id":"test_image"}}}""");
+        Assert.False(response["result"]!["isError"]?.GetValue<bool>() ?? false, response.ToJsonString());
+        var structured = response["result"]!["structuredContent"] as JsonObject
+            ?? JsonNode.Parse(response["result"]!["content"]![0]!["text"]!.ToString())!.AsObject();
+        Assert.Equal("image", structured["media_type"]!.ToString());
+        Assert.Equal("hello", structured["defaults"]!["prompt"]!.ToString());
+        Assert.Equal(2, structured["allowed_values"]!["prompt"]!.AsArray().Count);
+        Assert.Equal("string", structured["parameters"]!["prompt"]!["type"]!.ToString());
     }
 
     private async Task<JsonObject> SendMcpAsync(string json)

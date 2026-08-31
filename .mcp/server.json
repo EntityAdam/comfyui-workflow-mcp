@@ -31,6 +31,17 @@
               "default": "http://localhost:8188"
             }
           }
+        },
+        {
+          "name": "ComfyWorkflowMcp__Directory",
+          "value": "{directory}",
+          "variables": {
+            "directory": {
+              "description": "Root directory containing settings.yaml, workflows, and input.",
+              "isRequired": false,
+              "isSecret": false
+            }
+          }
         }
       ]
     }

@@ -4,6 +4,9 @@
 
 ### Changed
 
+- Consolidated workflow, YAML, settings, and input paths under the single
+  `ComfyWorkflowMcp__Directory` setting. `settings.yaml` lives at the root;
+  workflow JSON and YAML share `workflows`; uploads are limited to `input`.
 - Renamed the project, package, executable, namespaces, CI/CD identifiers, and
   configuration prefix to ComfyUI Workflow MCP.
 - Generation tools now select wait or fire-and-forget execution with
@@ -20,6 +23,11 @@
   immediately.
 - Configuration is workflow-scoped YAML with defaults, allowed values, numeric
   bounds, string patterns, media type, and setup-managed media defaults.
+
+### Added
+
+- `workflow_get_options(workflow_id)` exposes YAML-backed defaults, allowed
+  values, constraints, and discovered workflow parameters as structured data.
 
 ### Removed
 

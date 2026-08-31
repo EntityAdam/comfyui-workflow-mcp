@@ -16,11 +16,8 @@ public sealed class ComfyWorkflowMcpApplicationFactory : WebApplicationFactory<P
         ComfyUiBaseUrl = comfyUiBaseUrl;
         _fixtureDirectory = Path.Combine(
             Path.GetTempPath(), $"comfyui-workflow-mcp-tests-{Guid.NewGuid():N}");
-        var workflowDirectory = Path.Combine(_fixtureDirectory, "workflow-json");
-        var configurationDirectory = Path.Combine(
-            _fixtureDirectory, "workflow-yaml", "workflows");
+        var workflowDirectory = Path.Combine(_fixtureDirectory, "workflows");
         Directory.CreateDirectory(workflowDirectory);
-        Directory.CreateDirectory(configurationDirectory);
         File.WriteAllText(
             Path.Combine(workflowDirectory, "test_image.json"),
             """
@@ -32,8 +29,8 @@ public sealed class ComfyWorkflowMcpApplicationFactory : WebApplicationFactory<P
             }
             """);
         File.WriteAllText(
-            Path.Combine(configurationDirectory, "test_image.yaml"),
-            "media_type: image\n");
+            Path.Combine(workflowDirectory, "test_image.yaml"),
+            "media_type: image\ndefaults:\n  prompt: hello\nallowed_values:\n  prompt: [hello, goodbye]\n");
     }
 
     public string ComfyUiBaseUrl { get; }
@@ -42,12 +39,7 @@ public sealed class ComfyWorkflowMcpApplicationFactory : WebApplicationFactory<P
     {
         builder.UseEnvironment("Testing");
         builder.UseSetting("ComfyWorkflowMcp:BaseUrl", ComfyUiBaseUrl);
-        builder.UseSetting(
-            "ComfyWorkflowMcp:WorkflowDirectory",
-            Path.Combine(_fixtureDirectory, "workflow-json"));
-        builder.UseSetting(
-            "ComfyWorkflowMcp:ConfigurationDirectory",
-            Path.Combine(_fixtureDirectory, "workflow-yaml"));
+        builder.UseSetting("ComfyWorkflowMcp:Directory", _fixtureDirectory);
     }
 
     protected override void Dispose(bool disposing)

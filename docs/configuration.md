@@ -8,12 +8,8 @@ variables replace `:` with `__`:
 - `ComfyWorkflowMcp__BaseUrl` — ComfyUI URL; default `http://localhost:8188`
 - `ComfyWorkflowMcp__ServerUrl` — public MCP server URL; default
   `http://localhost:9001`
-- `ComfyWorkflowMcp__WorkflowDirectory` — initial workflow JSON directory;
-  default is a `workflows` directory beside the executable
-- `ComfyWorkflowMcp__ConfigurationDirectory` — YAML configuration directory;
-  default is a `configuration` directory beside the executable
-- `ComfyWorkflowMcp__InputRoot` — root from which local media may be uploaded;
-  default is an `input` directory beside the executable
+- `ComfyWorkflowMcp__Directory` — root for `settings.yaml`, workflows, workflow
+  YAML, and input media; default is the directory containing the executable
 
 These directories are not bundled. The server can start while ComfyUI is
 offline, but uploads, queue operations, and generation require ComfyUI.
@@ -22,7 +18,7 @@ offline, but uploads, queue operations, and generation require ComfyUI.
 
 `comfy_media_upload` accepts an image, audio file, or video and sends it through
 ComfyUI's upload endpoint. A local file must be inside
-`ComfyWorkflowMcp__InputRoot`:
+`<ComfyWorkflowMcp__Directory>/input`:
 
 ```json
 {
@@ -30,30 +26,21 @@ ComfyUI's upload endpoint. A local file must be inside
 }
 ```
 
-The server does not scan the input root. It opens only the exact file supplied
-to the tool. To use media from another directory, explicitly configure that
-directory as `ComfyWorkflowMcp__InputRoot`.
+The server does not scan the input directory. It opens only the exact file
+supplied to the tool. Place or copy selectable media under the configured
+root's `input` subdirectory.
 
 The returned `workflow_value` can be passed to a parameter such as
 `input_image`, `reference_image`, `input_audio`, or `input_video`.
 
 ## Workflow discovery
 
-The workflow directory contains API-format JSON exported from ComfyUI. Each
+The `workflows` subdirectory contains API-format JSON exported from ComfyUI. Each
 `.json` filename becomes its `workflow_id`; for example,
 `portrait_edit.json` is discovered as `portrait_edit`.
 
-Run `workflow_list()` after changing the directory or adding a workflow. The
+Run `workflow_list()` after adding a workflow. The
 package intentionally ships without example workflows.
-
-Setup can persist another workflow path in
-`<configuration-directory>/settings.yaml`:
-
-```yaml
-workflow_directory: /absolute/path/to/workflow-json
-```
-
-The setup-selected path takes precedence over the initial environment setting.
 
 ## Workflow parameters
 
@@ -86,7 +73,7 @@ known only after a rejected workflow run. Recording those constraints avoids
 repeating known-invalid submissions.
 
 Each workflow may have
-`<configuration-directory>/workflows/<workflow-id>.yaml`:
+`<ComfyWorkflowMcp__Directory>/workflows/<workflow-id>.yaml`, beside its JSON:
 
 ```yaml
 media_type: image
@@ -107,6 +94,9 @@ constraints:
 Values supplied in a generation call override YAML defaults. Values outside a
 known `allowed_values` list or configured constraint are rejected before
 submission to ComfyUI.
+
+Call `workflow_get_options(workflow_id)` to retrieve this YAML-backed data as
+structured JSON together with the parameters discovered in the workflow JSON.
 
 There are no family or model configuration layers. YAML is workflow-focused and
 exists to capture validated parameters, defaults, and media type.
@@ -131,7 +121,6 @@ default when `workflow_id` is omitted. If no matching default exists,
 `setup()` is allowed to:
 
 - inspect current paths, defaults, and workflows;
-- change the workflow JSON directory;
 - create or update workflow YAML configuration;
 - edit copied ComfyUI API-format JSON workflows in place;
 - parameterize node inputs; and

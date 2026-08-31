@@ -52,10 +52,10 @@ Point a local MCP client at the project:
 
 Some clients use `servers` rather than `mcpServers` as the top-level property.
 
-The source build does not include workflow JSON or YAML configuration. Run
-`setup()` after connecting, or set `ComfyWorkflowMcp__WorkflowDirectory` and
-`ComfyWorkflowMcp__ConfigurationDirectory` explicitly. Local media defaults to
-an unbundled `input` directory beside the executable.
+The source build does not include workflow JSON or YAML configuration. Set
+`ComfyWorkflowMcp__Directory` explicitly, put workflow JSON and YAML in its
+`workflows` subdirectory, then run `setup()` after connecting. Local media goes
+in its `input` subdirectory.
 
 ## Verify a source build
 

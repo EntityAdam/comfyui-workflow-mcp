@@ -52,8 +52,8 @@ Ask:
 
 > Run `setup()` and help me configure ComfyUI Workflow MCP.
 
-Setup can select the directories used for workflow JSON and YAML configuration,
-parameterize ComfyUI API-format workflow exports, and save a default workflow
+Setup can inspect the configured root, parameterize ComfyUI API-format workflow
+exports, and save a default workflow
 for image, audio, or video generation. ComfyUI may be on the same machine or a
 trusted local network.
 
@@ -61,8 +61,8 @@ trusted local network.
 
 The package does not include workflow or YAML files. During setup, the agent can:
 
-1. Choose or change the workflow JSON directory.
-2. Inspect the configured YAML directory.
+1. Inspect the configured root and discovered workflows.
+2. Configure YAML stored beside its workflow JSON.
 3. Edit a copied ComfyUI API-format JSON workflow and replace configurable node
    inputs with typed parameters.
 4. Add YAML defaults, allowed values, and constraints for parameters that
@@ -80,6 +80,8 @@ exported from ComfyUI and do not require version-preserving transformations.
 - `generate_audio()` runs an audio workflow.
 - `generate_video()` runs a video workflow.
 - `workflow_list()` lists discovered workflow IDs and their parameters.
+- `workflow_get_options(workflow_id)` returns YAML-backed defaults, allowed
+  values, constraints, and discovered parameters for one workflow.
 
 Each generation call requires `workflow_id` unless setup has saved a default
 for that media type. If neither is available, the tool recommends running
@@ -108,14 +110,14 @@ remains a ComfyUI job.
 
 ## Input media
 
-Local uploads are limited to `ComfyWorkflowMcp__InputRoot`. Its default is an
-`input` directory beside the executable. The directory is not bundled or
-scanned: the server reads only the exact path supplied to
+Local uploads are limited to the `input` subdirectory of
+`ComfyWorkflowMcp__Directory`. The directory is not bundled or scanned: the
+server reads only the exact path supplied to
 `comfy_media_upload()`.
 
-Set `ComfyWorkflowMcp__InputRoot` to another directory when you intentionally
-want to select media stored elsewhere. See [Configuration](docs/configuration.md)
-for details.
+Set `ComfyWorkflowMcp__Directory` to the root that should contain
+`settings.yaml`, `workflows`, and `input`. See
+[Configuration](docs/configuration.md) for details.
 
 ## How-to guides
 

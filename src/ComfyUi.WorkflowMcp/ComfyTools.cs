@@ -17,8 +17,7 @@ public sealed class ComfyTools(
 {
     [McpServerTool(Name = "setup"), Description("Inspect or modify ComfyUI Workflow MCP workflow setup, workflow YAML validation, media defaults, and PARAM_* bindings.")]
     public object Setup(
-        [Description("Operation: status, set_workflow_directory, configure_workflow, parameterize_workflow, or set_default_workflow.")] string operation = "status",
-        string? workflow_directory = null,
+        [Description("Operation: status, configure_workflow, parameterize_workflow, or set_default_workflow.")] string operation = "status",
         string? workflow_id = null,
         [Description("image, audio, or video.")] string? media_type = null,
         [Description("Parameter mapping: each key maps to node_id, input_name, and type.")] JsonObject? parameters = null,
@@ -31,12 +30,6 @@ public sealed class ComfyTools(
             return operation switch
             {
                 "status" => workflowConfiguration.Status(workflows),
-                "set_workflow_directory" => new
-                {
-                    success = true,
-                    workflow_directory = workflowConfiguration.SetWorkflowDirectory(Required(workflow_directory, nameof(workflow_directory))),
-                    restart_required = false
-                },
                 "configure_workflow" => new
                 {
                     success = true,
@@ -66,6 +59,10 @@ public sealed class ComfyTools(
             .ToArray();
         return new { workflows = catalog, count = catalog.Length, workflow_directory = workflows.DirectoryPath };
     }
+
+    [McpServerTool(Name = "workflow_get_options"), Description("Return a workflow's YAML-backed media type, defaults, allowed values, constraints, and discovered parameters.")]
+    public object WorkflowGetOptions(string workflow_id) =>
+        generationOptions.GetOptions(workflow_id);
 
     [McpServerTool(Name = "generate_image"), Description("Run an image workflow, wait for completion, and display its first image output.")]
     public Task<CallToolResult> GenerateImage(

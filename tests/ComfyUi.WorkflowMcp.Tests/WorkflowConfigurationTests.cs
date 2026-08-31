@@ -10,12 +10,10 @@ public sealed class WorkflowConfigurationTests
     {
         using var temp = new TempDirectory();
         var workflowDirectory = Path.Combine(temp.Path, "workflows");
-        var configurationDirectory = Path.Combine(temp.Path, "configuration");
         Directory.CreateDirectory(workflowDirectory);
-        Directory.CreateDirectory(Path.Combine(configurationDirectory, "workflows"));
         File.WriteAllText(Path.Combine(workflowDirectory, "image.json"),
             """{"1":{"class_type":"Sampler","inputs":{"prompt":"PARAM_PROMPT","steps":"PARAM_INT_STEPS","sampler":"PARAM_SAMPLER"}}}""");
-        File.WriteAllText(Path.Combine(configurationDirectory, "workflows", "image.yaml"),
+        File.WriteAllText(Path.Combine(workflowDirectory, "image.yaml"),
             """
             media_type: image
             defaults:
@@ -28,9 +26,7 @@ public sealed class WorkflowConfigurationTests
                 minimum: 1
                 maximum: 20
             """);
-        var config = TestConfiguration.Create(
-            ("ComfyWorkflowMcp:WorkflowDirectory", workflowDirectory),
-            ("ComfyWorkflowMcp:ConfigurationDirectory", configurationDirectory));
+        var config = TestConfiguration.Create(("ComfyWorkflowMcp:Directory", temp.Path));
         var manager = new WorkflowManager(config);
         var options = new GenerationOptionsService(manager, new WorkflowConfigurationManager(config));
 
@@ -50,9 +46,7 @@ public sealed class WorkflowConfigurationTests
         Directory.CreateDirectory(workflowDirectory);
         File.WriteAllText(Path.Combine(workflowDirectory, "copied.json"),
             """{"7":{"class_type":"KSampler","inputs":{"steps":20}}}""");
-        var config = TestConfiguration.Create(
-            ("ComfyWorkflowMcp:WorkflowDirectory", workflowDirectory),
-            ("ComfyWorkflowMcp:ConfigurationDirectory", Path.Combine(temp.Path, "configuration")));
+        var config = TestConfiguration.Create(("ComfyWorkflowMcp:Directory", temp.Path));
         var workflows = new WorkflowManager(config);
         var manager = new WorkflowConfigurationManager(config);
 

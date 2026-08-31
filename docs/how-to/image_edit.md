@@ -17,5 +17,5 @@ The agent should:
 If the workflow accepts a reference image, upload that file separately and pass
 its `workflow_value` to the matching parameter.
 
-The attachment must be under `ComfyWorkflowMcp__InputRoot`. See
+The attachment must be under `<ComfyWorkflowMcp__Directory>/input`. See
 [Configuration](../configuration.md#input-media).

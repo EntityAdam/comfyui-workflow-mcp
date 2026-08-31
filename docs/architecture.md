@@ -9,6 +9,7 @@ The workflow-facing tools are:
 
 - `setup()`
 - `workflow_list()`
+- `workflow_get_options()`
 - `generate_image()`
 - `generate_audio()`
 - `generate_video()`

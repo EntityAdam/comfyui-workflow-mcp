@@ -7,7 +7,7 @@ namespace ComfyUi.WorkflowMcp;
 
 public sealed partial class WorkflowConfigurationManager(IConfiguration configuration)
 {
-    public string RootDirectory => configuration.ConfigurationDirectory();
+    public string RootDirectory => configuration.Directory();
     public string SettingsPath => Path.Combine(RootDirectory, "settings.yaml");
 
     public WorkflowValidation Load(string workflowId)
@@ -37,21 +37,10 @@ public sealed partial class WorkflowConfigurationManager(IConfiguration configur
         return new
         {
             workflow_directory = workflows.DirectoryPath,
-            configuration_directory = RootDirectory,
+            directory = RootDirectory,
             default_workflows = defaults,
             workflows = workflows.Catalog()
         };
-    }
-
-    public string SetWorkflowDirectory(string directory)
-    {
-        var fullPath = Path.GetFullPath(directory);
-        if (!Directory.Exists(fullPath))
-            throw new DirectoryNotFoundException($"Workflow directory '{fullPath}' does not exist.");
-        var settings = LoadDocument(SettingsPath);
-        settings["workflow_directory"] = fullPath;
-        SaveDocument(SettingsPath, settings);
-        return fullPath;
     }
 
     public string SetDefaultWorkflow(string mediaType, string workflowId, WorkflowManager workflows)

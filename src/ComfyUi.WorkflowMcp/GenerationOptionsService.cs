@@ -25,6 +25,9 @@ public sealed class GenerationOptionsService(
         {
             workflow_id = workflowId,
             media_type = validation.MediaType,
+            defaults = validation.Defaults,
+            allowed_values = validation.AllowedValues,
+            constraints = validation.Constraints,
             parameters = parameters.Values.ToDictionary(parameter => parameter.Name, parameter => new
             {
                 type = TypeName(parameter.Type),

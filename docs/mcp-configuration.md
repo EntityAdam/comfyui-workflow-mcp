@@ -70,9 +70,7 @@ MCP server.
       "env": {
         "ComfyWorkflowMcp__BaseUrl": "http://192.168.1.50:8188",
         "ComfyWorkflowMcp__ServerUrl": "http://localhost:9001",
-        "ComfyWorkflowMcp__WorkflowDirectory": "/absolute/path/to/workflow-json",
-        "ComfyWorkflowMcp__ConfigurationDirectory": "/absolute/path/to/workflow-yaml",
-        "ComfyWorkflowMcp__InputRoot": "/absolute/path/to/input-media"
+        "ComfyWorkflowMcp__Directory": "/absolute/path/to/comfyui-workflow-mcp"
       }
     }
   }
@@ -80,8 +78,8 @@ MCP server.
 ```
 
 Only include settings that differ from their defaults. The package does not
-include workflow JSON, YAML configuration, or input media. Run `setup()` to
-select a workflow directory and configure workflows.
+include workflow JSON, YAML configuration, or input media. Put workflow JSON
+under the root's `workflows` subdirectory and run `setup()` to configure it.
 
 ## ComfyUI at another URL
 
@@ -91,9 +89,9 @@ MCP server. Do not append an API path.
 
 ## Local input media
 
-`ComfyWorkflowMcp__InputRoot` is a filesystem boundary. When unset, it defaults
-to an `input` directory beside the executable. The server does not scan it and
-opens only a path explicitly supplied to `comfy_media_upload()`.
+`<ComfyWorkflowMcp__Directory>/input` is the filesystem boundary. The server
+does not scan it and opens only a path explicitly supplied to
+`comfy_media_upload()`.
 
 On Windows, JSON paths must use escaped backslashes such as
 `"C:\\ComfyUI\\input"`, or forward slashes such as `"C:/ComfyUI/input"`.
