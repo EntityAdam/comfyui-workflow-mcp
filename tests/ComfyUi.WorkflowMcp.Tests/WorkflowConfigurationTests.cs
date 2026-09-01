@@ -16,6 +16,7 @@ public sealed class WorkflowConfigurationTests
         File.WriteAllText(Path.Combine(workflowDirectory, "image.yaml"),
             """
             media_type: image
+            wait_for_completion: false
             defaults:
               steps: 8
               sampler: euler
@@ -29,6 +30,8 @@ public sealed class WorkflowConfigurationTests
         var config = TestConfiguration.Create(("ComfyWorkflowMcp:Directory", temp.Path));
         var manager = new WorkflowManager(config);
         var options = new GenerationOptionsService(manager, new WorkflowConfigurationManager(config));
+
+        Assert.False(new WorkflowConfigurationManager(config).Load("image").WaitForCompletion);
 
         var resolved = options.Resolve("image", new JsonObject { ["prompt"] = "cat" });
         Assert.Equal("8", resolved.Values["steps"]!.ToString());
@@ -56,5 +59,31 @@ public sealed class WorkflowConfigurationTests
         }, workflows);
 
         Assert.Equal("PARAM_INT_STEPS", workflows.Load("copied")!["7"]!["inputs"]!["steps"]!.ToString());
+    }
+
+    [Fact]
+    public void ParameterizationCallsAreAdditive()
+    {
+        using var temp = new TempDirectory();
+        var workflowDirectory = Path.Combine(temp.Path, "workflows");
+        Directory.CreateDirectory(workflowDirectory);
+        File.WriteAllText(Path.Combine(workflowDirectory, "copied.json"),
+            """{"6":{"class_type":"Text","inputs":{"text":""}},"7":{"class_type":"KSampler","inputs":{"steps":20}}}""");
+        var config = TestConfiguration.Create(("ComfyWorkflowMcp:Directory", temp.Path));
+        var workflows = new WorkflowManager(config);
+        var manager = new WorkflowConfigurationManager(config);
+
+        manager.ParameterizeWorkflow("copied", new JsonObject
+        {
+            ["prompt"] = new JsonObject { ["node_id"] = "6", ["input_name"] = "text", ["type"] = "string" }
+        }, workflows);
+        manager.ParameterizeWorkflow("copied", new JsonObject
+        {
+            ["steps"] = new JsonObject { ["node_id"] = "7", ["input_name"] = "steps", ["type"] = "integer" }
+        }, workflows);
+
+        var result = workflows.Load("copied")!;
+        Assert.Equal("PARAM_STR_PROMPT", result["6"]!["inputs"]!["text"]!.ToString());
+        Assert.Equal("PARAM_INT_STEPS", result["7"]!["inputs"]!["steps"]!.ToString());
     }
 }

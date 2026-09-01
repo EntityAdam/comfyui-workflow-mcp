@@ -80,6 +80,8 @@ exported from ComfyUI and do not require version-preserving transformations.
 - `generate_audio()` runs an audio workflow.
 - `generate_video()` runs a video workflow.
 - `workflow_list()` lists discovered workflow IDs and their parameters.
+- `workflow_get(workflow_id)` returns one API-format workflow JSON for node and
+  input inspection; `workflow_id` is mandatory.
 - `workflow_get_options(workflow_id)` returns YAML-backed defaults, allowed
   values, constraints, and discovered parameters for one workflow.
 
@@ -87,11 +89,17 @@ Each generation call requires `workflow_id` unless setup has saved a default
 for that media type. If neither is available, the tool recommends running
 `setup()`.
 
-Generation waits for completion by default and returns media for the MCP client
-to display. Set `wait_for_completion` to `false` for fire-and-forget submission;
+Generation uses the workflow YAML's `wait_for_completion` value, defaulting to
+`true`, and returns media for the MCP client to display when waiting. Set the
+generation argument explicitly to override the workflow default;
 the tool queues the workflow on ComfyUI and returns its prompt ID without
 waiting for media. The wait and submit paths are internal APIs, not separate
 MCP tools.
+
+Completed `generate_image()` calls also save a uniquely named copy under the
+configured root's `input` subdirectory. The result includes `saved_path` and
+`input_filename` so the image can be reused as a later workflow input. Submit-only
+calls do not save a local copy.
 
 If a workflow produces more than one output, the server returns only the first
 output matching the requested media type.

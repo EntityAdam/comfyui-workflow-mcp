@@ -23,6 +23,7 @@ public sealed partial class WorkflowConfigurationManager(IConfiguration configur
         return new WorkflowValidation(
             workflowId,
             root["media_type"]?.ToString(),
+            root["wait_for_completion"]?.GetValue<bool?>(),
             defaults,
             allowed,
             constraints);
@@ -39,7 +40,35 @@ public sealed partial class WorkflowConfigurationManager(IConfiguration configur
             workflow_directory = workflows.DirectoryPath,
             directory = RootDirectory,
             default_workflows = defaults,
-            workflows = workflows.Catalog()
+            workflows = workflows.Catalog(),
+            parameterization_guide = new
+            {
+                json_shape = "The root object is keyed by node ID. Each node normally contains class_type, inputs, and optional _meta. Inspect node.inputs for literal values to expose. An array such as [\"105:104\", 0] links another node's output and should not be parameterized as a literal.",
+                common_input_names = new[] { "cfg", "steps", "width", "height", "prompt", "negative", "negative_prompt" },
+                discovery = new[]
+                {
+                    "Call workflow_list to discover workflow IDs, then call workflow_get with the required workflow_id to retrieve its JSON.",
+                    "Search every node's inputs object for common names and other values users may need to change.",
+                    "Record the exact top-level node ID and exact input key. Node IDs may contain colons.",
+                    "Choose a stable public parameter name and the matching type: string, integer, number, or boolean.",
+                    "Call setup with operation parameterize_workflow, the workflow_id, and only the mappings to add or change. Calls are additive: existing PARAM_* bindings remain in the JSON, and multiple parameters may also be submitted together.",
+                    "Call setup with configure_workflow to record media_type, defaults, allowed_values, and constraints in YAML. Then verify with workflow_get_options."
+                },
+                parameterize_workflow_example = new
+                {
+                    operation = "parameterize_workflow",
+                    workflow_id = "example_workflow",
+                    parameters = new Dictionary<string, object>
+                    {
+                        ["prompt"] = new { node_id = "6", input_name = "text", type = "string" },
+                        ["negative_prompt"] = new { node_id = "7", input_name = "text", type = "string" },
+                        ["cfg"] = new { node_id = "3", input_name = "cfg", type = "number" },
+                        ["steps"] = new { node_id = "3", input_name = "steps", type = "integer" },
+                        ["width"] = new { node_id = "5", input_name = "width", type = "integer" },
+                        ["height"] = new { node_id = "5", input_name = "height", type = "integer" }
+                    }
+                }
+            }
         };
     }
 
@@ -59,6 +88,7 @@ public sealed partial class WorkflowConfigurationManager(IConfiguration configur
     public string SaveWorkflow(
         string workflowId,
         string? mediaType,
+        bool? waitForCompletion,
         JsonObject? defaults,
         JsonObject? allowedValues,
         JsonObject? constraints)
@@ -69,6 +99,8 @@ public sealed partial class WorkflowConfigurationManager(IConfiguration configur
         document.Remove("model");
         if (!string.IsNullOrWhiteSpace(mediaType))
             document["media_type"] = NormalizeMediaType(mediaType);
+        if (waitForCompletion is not null)
+            document["wait_for_completion"] = waitForCompletion.Value;
         if (defaults is not null) document["defaults"] = defaults.DeepClone();
         if (allowedValues is not null) document["allowed_values"] = allowedValues.DeepClone();
         if (constraints is not null) document["constraints"] = constraints.DeepClone();

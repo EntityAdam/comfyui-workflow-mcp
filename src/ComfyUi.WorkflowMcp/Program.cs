@@ -6,6 +6,7 @@ builder.Services.AddSingleton<WorkflowManager>();
 builder.Services.AddSingleton<WorkflowConfigurationManager>();
 builder.Services.AddSingleton<GenerationOptionsService>();
 builder.Services.AddSingleton<WorkflowExecutionService>();
+builder.Services.AddSingleton<GeneratedImageStore>();
 builder.Services
     .AddHttpClient<ComfyClient>(client => client.Timeout = Timeout.InfiniteTimeSpan)
     .AddStandardResilienceHandler(options =>

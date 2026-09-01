@@ -4,6 +4,9 @@
 
 ### Changed
 
+- `setup()` now teaches clients how to parse ComfyUI API workflow JSON,
+  discover common configurable inputs, and make additive
+  `parameterize_workflow` calls without repeating existing bindings.
 - Consolidated workflow, YAML, settings, and input paths under the single
   `ComfyWorkflowMcp__Directory` setting. `settings.yaml` lives at the root;
   workflow JSON and YAML share `workflows`; uploads are limited to `input`.
@@ -26,6 +29,12 @@
 
 ### Added
 
+- Workflow YAML can define `wait_for_completion`; an explicit generation-tool
+  argument overrides it, and the fallback remains `true`.
+- Completed `generate_image()` calls save a uniquely named reusable copy under
+  the configured `input` directory and report its path and filename.
+- `workflow_get(workflow_id)` gives clients read-only access to one parsed
+  API-format workflow JSON; the workflow ID is mandatory.
 - `workflow_get_options(workflow_id)` exposes YAML-backed defaults, allowed
   values, constraints, and discovered workflow parameters as structured data.
 

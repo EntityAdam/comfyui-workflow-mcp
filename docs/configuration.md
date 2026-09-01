@@ -33,6 +33,11 @@ root's `input` subdirectory.
 The returned `workflow_value` can be passed to a parameter such as
 `input_image`, `reference_image`, `input_audio`, or `input_video`.
 
+When `generate_image()` waits for completion, its returned image is also saved
+under this `input` directory with a unique filename. The structured result
+contains both `saved_path` and `input_filename`. Fire-and-forget submissions do
+not save anything locally.
+
 ## Workflow discovery
 
 The `workflows` subdirectory contains API-format JSON exported from ComfyUI. Each
@@ -77,6 +82,7 @@ Each workflow may have
 
 ```yaml
 media_type: image
+wait_for_completion: true
 defaults:
   steps: 20
   scheduler: normal
@@ -94,6 +100,11 @@ constraints:
 Values supplied in a generation call override YAML defaults. Values outside a
 known `allowed_values` list or configured constraint are rejected before
 submission to ComfyUI.
+
+`wait_for_completion` controls the workflow's generation default. An explicit
+generation-tool argument overrides it; when neither is provided, the server
+waits for completion. Fire-and-forget workflows return their ComfyUI prompt ID
+and do not save output media locally.
 
 Call `workflow_get_options(workflow_id)` to retrieve this YAML-backed data as
 structured JSON together with the parameters discovered in the workflow JSON.
@@ -128,3 +139,39 @@ default when `workflow_id` is omitted. If no matching default exists,
 
 Workflow exports are treated as editable copies. Setup does not need to retain
 an untouched source version or create version history.
+
+### Discovering parameters in workflow JSON
+
+Call `setup(operation: "status")` for an embedded parameterization guide and
+example. Use `workflow_list()` to discover IDs, then call
+`workflow_get(workflow_id)` to retrieve the JSON; `workflow_id` is mandatory.
+In an API-format ComfyUI export, the root object is keyed by node ID.
+Each node's `inputs` object contains either literal values or connections to
+other nodes. Connections are arrays such as `["105:104", 0]`; parameterize the
+literal at its source node rather than replacing the connection.
+
+Useful input names commonly include `cfg`, `steps`, `width`, `height`, `prompt`,
+`negative`, and `negative_prompt`. Names vary by custom node, so inspect all
+inputs and use their exact node ID and input key:
+
+```json
+{
+  "operation": "parameterize_workflow",
+  "workflow_id": "example_workflow",
+  "parameters": {
+    "prompt": { "node_id": "6", "input_name": "text", "type": "string" },
+    "cfg": { "node_id": "3", "input_name": "cfg", "type": "number" },
+    "steps": { "node_id": "3", "input_name": "steps", "type": "integer" }
+  }
+}
+```
+
+The supported types are `string`, `integer`, `number`, and `boolean`. Setup
+replaces the selected literal inputs with typed `PARAM_*` placeholders in the
+workflow copy. Follow it with `configure_workflow` to record defaults and known
+validation rules, then inspect the result with `workflow_get_options()`.
+
+Parameterization is additive. A call may add only `prompt`, followed later by a
+call that adds only `steps`; the existing prompt placeholder remains in the
+workflow JSON. A call changes only the explicitly targeted node inputs, so
+previous mappings do not need to be repeated.

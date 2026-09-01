@@ -25,6 +25,7 @@ public sealed class GenerationOptionsService(
         {
             workflow_id = workflowId,
             media_type = validation.MediaType,
+            wait_for_completion = validation.WaitForCompletion ?? true,
             defaults = validation.Defaults,
             allowed_values = validation.AllowedValues,
             constraints = validation.Constraints,

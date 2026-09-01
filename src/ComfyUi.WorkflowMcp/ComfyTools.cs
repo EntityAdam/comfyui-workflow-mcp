@@ -13,14 +13,16 @@ public sealed class ComfyTools(
     WorkflowManager workflows,
     WorkflowConfigurationManager workflowConfiguration,
     GenerationOptionsService generationOptions,
-    WorkflowExecutionService execution)
+    WorkflowExecutionService execution,
+    GeneratedImageStore generatedImages)
 {
-    [McpServerTool(Name = "setup"), Description("Inspect or modify ComfyUI Workflow MCP workflow setup, workflow YAML validation, media defaults, and PARAM_* bindings.")]
+    [McpServerTool(Name = "setup"), Description("Inspect and configure API-format ComfyUI workflows. Start with status for parsing and parameterization guidance. A workflow JSON is an object keyed by node ID; each node has class_type and inputs. Look in inputs for editable literal values such as cfg, steps, width, height, prompt, and negative/negative_prompt. Arrays like [\"node-id\", 0] are connections, not literal values. Use parameterize_workflow with workflow_id and a parameters object whose keys are public parameter names and whose values contain the exact node_id, input_name, and type.")]
     public object Setup(
-        [Description("Operation: status, configure_workflow, parameterize_workflow, or set_default_workflow.")] string operation = "status",
-        string? workflow_id = null,
+        [Description("Operation: status (returns paths plus a parameterization guide), configure_workflow, parameterize_workflow, or set_default_workflow.")] string operation = "status",
+        [Description("Workflow JSON filename without .json. Required except for status.")] string? workflow_id = null,
         [Description("image, audio, or video.")] string? media_type = null,
-        [Description("Parameter mapping: each key maps to node_id, input_name, and type.")] JsonObject? parameters = null,
+        [Description("For configure_workflow: default completion behavior for this workflow. Omit to preserve its existing value; absent YAML defaults to true.")] bool? wait_for_completion = null,
+        [Description("For parameterize_workflow: additive mappings keyed by desired public parameter name. Existing PARAM_* bindings remain unchanged; supply only new or targeted bindings. Each value requires node_id (exact top-level JSON key, including colons), input_name (exact key under that node's inputs), and type: string, integer, number, or boolean. Example: {\"steps\":{\"node_id\":\"3\",\"input_name\":\"steps\",\"type\":\"integer\"}}.")] JsonObject? parameters = null,
         JsonObject? defaults = null,
         JsonObject? allowed_values = null,
         [Description("Per-parameter validation including minimum, maximum, and pattern.")] JsonObject? constraints = null)
@@ -33,7 +35,7 @@ public sealed class ComfyTools(
                 "configure_workflow" => new
                 {
                     success = true,
-                    path = ConfigureWorkflow(Required(workflow_id, nameof(workflow_id)), media_type, defaults, allowed_values, constraints)
+                    path = ConfigureWorkflow(Required(workflow_id, nameof(workflow_id)), media_type, wait_for_completion, defaults, allowed_values, constraints)
                 },
                 "parameterize_workflow" => new
                 {
@@ -60,6 +62,15 @@ public sealed class ComfyTools(
         return new { workflows = catalog, count = catalog.Length, workflow_directory = workflows.DirectoryPath };
     }
 
+    [McpServerTool(Name = "workflow_get"), Description("Return one saved API-format ComfyUI workflow JSON as structured data for inspection. workflow_id is required; use workflow_list to discover IDs.")]
+    public object WorkflowGet(
+        [Description("Required workflow JSON filename without .json.")] string workflow_id)
+    {
+        var workflow = workflows.Load(workflow_id)
+            ?? throw new ArgumentException($"Workflow '{workflow_id}' not found.");
+        return new { workflow_id, workflow };
+    }
+
     [McpServerTool(Name = "workflow_get_options"), Description("Return a workflow's YAML-backed media type, defaults, allowed values, constraints, and discovered parameters.")]
     public object WorkflowGetOptions(string workflow_id) =>
         generationOptions.GetOptions(workflow_id);
@@ -69,7 +80,7 @@ public sealed class ComfyTools(
         string prompt,
         string? workflow_id = null,
         JsonObject? options = null,
-        [Description("Wait for the first image output when true; submit to ComfyUI and return immediately when false.")] bool wait_for_completion = true,
+        [Description("Override completion behavior. Omit to use this workflow's YAML wait_for_completion value, which defaults to true.")] bool? wait_for_completion = null,
         CancellationToken cancellationToken = default)
     {
         var values = options?.DeepClone().AsObject() ?? [];
@@ -83,7 +94,7 @@ public sealed class ComfyTools(
         string lyrics,
         string? workflow_id = null,
         JsonObject? options = null,
-        [Description("Wait for the first audio output when true; submit to ComfyUI and return immediately when false.")] bool wait_for_completion = true,
+        [Description("Override completion behavior. Omit to use this workflow's YAML wait_for_completion value, which defaults to true.")] bool? wait_for_completion = null,
         CancellationToken cancellationToken = default)
     {
         var values = options?.DeepClone().AsObject() ?? [];
@@ -97,7 +108,7 @@ public sealed class ComfyTools(
         string prompt,
         string? workflow_id = null,
         JsonObject? options = null,
-        [Description("Wait for the first video output when true; submit to ComfyUI and return immediately when false.")] bool wait_for_completion = true,
+        [Description("Override completion behavior. Omit to use this workflow's YAML wait_for_completion value, which defaults to true.")] bool? wait_for_completion = null,
         CancellationToken cancellationToken = default)
     {
         var values = options?.DeepClone().AsObject() ?? [];
@@ -159,7 +170,10 @@ public sealed class ComfyTools(
                 throw new InvalidOperationException($"Workflow '{workflowId}' is configured for {resolved.MediaType}, not {mediaType}.");
             var rendered = workflows.RenderResolved(workflowId, resolved.Values);
             var completed = await execution.RunAsync(rendered, mediaType, cancellationToken);
-            return MediaResult(completed, workflowId);
+            var savedPath = string.Equals(mediaType, "image", StringComparison.OrdinalIgnoreCase)
+                ? await generatedImages.SaveAsync(completed, cancellationToken)
+                : null;
+            return MediaResult(completed, workflowId, savedPath);
         }
         catch (GenerationParameterException ex)
         {
@@ -172,13 +186,16 @@ public sealed class ComfyTools(
         string mediaType,
         string? workflowId,
         JsonObject values,
-        bool waitForCompletion,
+        bool? waitForCompletion,
         CancellationToken cancellationToken)
     {
         try
         {
             var resolvedWorkflowId = ResolveWorkflowId(mediaType, workflowId);
-            return waitForCompletion
+            var shouldWait = waitForCompletion
+                ?? workflowConfiguration.Load(resolvedWorkflowId).WaitForCompletion
+                ?? true;
+            return shouldWait
                 ? Run(resolvedWorkflowId, values, mediaType, cancellationToken)
                 : Submit(resolvedWorkflowId, values, mediaType, cancellationToken);
         }
@@ -243,7 +260,10 @@ public sealed class ComfyTools(
         workflowConfiguration.DefaultWorkflow(mediaType) ??
         throw new InvalidOperationException($"No default {mediaType} workflow is configured. Run setup with operation set_default_workflow, or supply workflow_id.");
 
-    private static CallToolResult MediaResult(CompletedWorkflow completed, string workflowId)
+    private static CallToolResult MediaResult(
+        CompletedWorkflow completed,
+        string workflowId,
+        string? savedPath)
     {
         ContentBlock media = completed.MimeType.StartsWith("image/", StringComparison.OrdinalIgnoreCase)
             ? ImageContentBlock.FromBytes(completed.Bytes, completed.MimeType)
@@ -260,9 +280,20 @@ public sealed class ComfyTools(
                 prompt_id = completed.PromptId,
                 workflow_id = workflowId,
                 filename = completed.Output.Filename,
-                mime_type = completed.MimeType
+                mime_type = completed.MimeType,
+                saved_path = savedPath,
+                input_filename = savedPath is null ? null : Path.GetFileName(savedPath)
             }),
-            Content = [media, new TextContentBlock { Text = $"Completed workflow '{workflowId}' as prompt {completed.PromptId}; returning {completed.Output.Filename}." }]
+            Content =
+            [
+                media,
+                new TextContentBlock
+                {
+                    Text = savedPath is null
+                        ? $"Completed workflow '{workflowId}' as prompt {completed.PromptId}; returning {completed.Output.Filename}."
+                        : $"Completed workflow '{workflowId}' as prompt {completed.PromptId}; returning {completed.Output.Filename} and saved a reusable copy to {savedPath}."
+                }
+            ]
         };
     }
 
@@ -276,7 +307,7 @@ public sealed class ComfyTools(
     private static string Required(string? value, string name) =>
         !string.IsNullOrWhiteSpace(value) ? value : throw new ArgumentException($"{name} is required.");
 
-    private string ConfigureWorkflow(string workflowId, string? mediaType, JsonObject? defaults, JsonObject? allowedValues, JsonObject? constraints)
+    private string ConfigureWorkflow(string workflowId, string? mediaType, bool? waitForCompletion, JsonObject? defaults, JsonObject? allowedValues, JsonObject? constraints)
     {
         var workflow = workflows.Load(workflowId)
             ?? throw new ArgumentException($"Workflow '{workflowId}' not found.");
@@ -287,6 +318,6 @@ public sealed class ComfyTools(
                      .Distinct(StringComparer.Ordinal))
             if (!parameters.ContainsKey(configured))
                 throw new ArgumentException($"Workflow '{workflowId}' has no parameter '{configured}'.");
-        return workflowConfiguration.SaveWorkflow(workflowId, mediaType, defaults, allowedValues, constraints);
+        return workflowConfiguration.SaveWorkflow(workflowId, mediaType, waitForCompletion, defaults, allowedValues, constraints);
     }
 }
