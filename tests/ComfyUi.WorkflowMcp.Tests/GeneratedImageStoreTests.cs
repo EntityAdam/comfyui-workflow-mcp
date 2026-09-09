@@ -2,13 +2,13 @@ using Xunit;
 
 namespace ComfyUi.WorkflowMcp.Tests;
 
-public sealed class GeneratedImageStoreTests
+public sealed class GeneratedMediaStoreTests
 {
     [Fact]
-    public async Task SavesCompletedImageUnderConfiguredInputDirectory()
+    public async Task SavesCompletedMediaUnderConfiguredOutputDirectory()
     {
         using var temp = new TempDirectory();
-        var store = new GeneratedImageStore(TestConfiguration.Create(
+        var store = new GeneratedMediaStore(TestConfiguration.Create(
             ("ComfyWorkflowMcp:Directory", temp.Path)));
         byte[] bytes = [1, 2, 3, 4];
         var completed = new CompletedWorkflow(
@@ -19,16 +19,16 @@ public sealed class GeneratedImageStoreTests
 
         var path = await store.SaveAsync(completed, TestContext.Current.CancellationToken);
 
-        Assert.Equal(Path.Combine(temp.Path, "input"), Path.GetDirectoryName(path));
+        Assert.Equal(Path.Combine(temp.Path, "output"), Path.GetDirectoryName(path));
         Assert.Matches("^unsafe_image-[a-f0-9]{32}\\.png$", Path.GetFileName(path));
         Assert.Equal(bytes, await File.ReadAllBytesAsync(path, TestContext.Current.CancellationToken));
     }
 
     [Fact]
-    public async Task RejectsNonImageOutput()
+    public async Task SavesCompletedAudioWithMatchingExtension()
     {
         using var temp = new TempDirectory();
-        var store = new GeneratedImageStore(TestConfiguration.Create(
+        var store = new GeneratedMediaStore(TestConfiguration.Create(
             ("ComfyWorkflowMcp:Directory", temp.Path)));
         var completed = new CompletedWorkflow(
             "prompt-1",
@@ -36,7 +36,9 @@ public sealed class GeneratedImageStoreTests
             [1],
             "audio/mpeg");
 
-        await Assert.ThrowsAsync<ArgumentException>(() =>
-            store.SaveAsync(completed, TestContext.Current.CancellationToken));
+        var path = await store.SaveAsync(completed, TestContext.Current.CancellationToken);
+
+        Assert.EndsWith(".mp3", path);
+        Assert.Equal([1], await File.ReadAllBytesAsync(path, TestContext.Current.CancellationToken));
     }
 }

@@ -26,6 +26,16 @@ public sealed class ComfyClient(HttpClient httpClient, IConfiguration configurat
     public async Task<JsonObject> GetHistoryAsync(string promptId, CancellationToken cancellationToken = default) =>
         await httpClient.GetFromJsonAsync<JsonObject>($"{BaseUrl}/history/{Uri.EscapeDataString(promptId)}", cancellationToken) ?? [];
 
+    public async Task<IReadOnlyList<string>> GetDiffusionModelsAsync(CancellationToken cancellationToken = default)
+    {
+        var models = await httpClient.GetFromJsonAsync<JsonArray>($"{BaseUrl}/models/diffusion_models", cancellationToken) ?? [];
+        return models
+            .Select(model => model?.GetValue<string>())
+            .Where(model => !string.IsNullOrWhiteSpace(model))
+            .Select(model => model!)
+            .ToArray();
+    }
+
     public async Task<byte[]> FetchOutputAsync(ComfyOutputAsset output, CancellationToken cancellationToken = default)
     {
         var url = $"{BaseUrl}/view?filename={Uri.EscapeDataString(output.Filename)}&subfolder={Uri.EscapeDataString(output.Subfolder)}&type={Uri.EscapeDataString(output.FolderType)}";

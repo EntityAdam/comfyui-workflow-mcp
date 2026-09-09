@@ -9,7 +9,8 @@ Attach an image and ask your agent:
 
 The agent should:
 
-1. Call `comfy_media_upload()` with the image's accessible `file_path`.
+1. Call `asset_stage()` with the image's base64 data, then call
+   `comfy_media_upload()` with its returned filename.
 2. Call `workflow_list()` if the workflow ID is not known.
 3. Call `generate_image()` with the upscaling `workflow_id` and the returned
    `workflow_value` for the workflow's image input.

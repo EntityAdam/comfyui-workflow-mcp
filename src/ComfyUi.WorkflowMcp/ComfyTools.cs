@@ -8,13 +8,13 @@ namespace ComfyUi.WorkflowMcp;
 
 [McpServerToolType]
 public sealed class ComfyTools(
-    IConfiguration configuration,
     ComfyClient client,
     WorkflowManager workflows,
     WorkflowConfigurationManager workflowConfiguration,
     GenerationOptionsService generationOptions,
     WorkflowExecutionService execution,
-    GeneratedImageStore generatedImages)
+    GeneratedMediaStore generatedMedia,
+    MediaAssetStore mediaAssets)
 {
     [McpServerTool(Name = "setup"), Description("Inspect and configure API-format ComfyUI workflows. Start with status for parsing and parameterization guidance. A workflow JSON is an object keyed by node ID; each node has class_type and inputs. Look in inputs for editable literal values such as cfg, steps, width, height, prompt, and negative/negative_prompt. Arrays like [\"node-id\", 0] are connections, not literal values. Use parameterize_workflow with workflow_id and a parameters object whose keys are public parameter names and whose values contain the exact node_id, input_name, and type.")]
     public object Setup(
@@ -116,20 +116,59 @@ public sealed class ComfyTools(
         return RunGenerated("video", workflow_id, values, wait_for_completion, cancellationToken);
     }
 
-    [McpServerTool(Name = "comfy_media_upload"), Description("Upload a server-accessible image, audio, or video file through ComfyUI's upload endpoint.")]
-    public async Task<object> ComfyMediaUpload(string file_path, string? filename = null, string? subfolder = "comfyui-workflow-mcp", bool overwrite = false, CancellationToken cancellationToken = default)
+    [McpServerTool(Name = "comfy_media_upload"), Description("Upload one media asset to ComfyUI by its filename. Use asset_stage or asset_list to obtain the filename.")]
+    public async Task<object> ComfyMediaUpload(
+        [Description("Asset filename only, without directory components.")] string filename,
+        bool overwrite = false,
+        CancellationToken cancellationToken = default)
     {
         try
         {
-            var inputRoot = configuration.InputRoot();
-            var path = Path.GetFullPath(file_path);
-            if (!PathSafety.IsWithin(path, inputRoot) || !File.Exists(path))
-                throw new ArgumentException("file_path does not exist within the configured input root.");
+            var path = mediaAssets.Find(filename)
+                ?? throw new ArgumentException("filename does not exist in the configured assets directory.");
             await using var content = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, FileOptions.Asynchronous | FileOptions.SequentialScan);
-            var upload = await client.UploadInputAsync(content, filename ?? Path.GetFileName(path), ComfyClient.MimeFor(filename ?? path), subfolder, overwrite, cancellationToken);
+            var upload = await client.UploadInputAsync(content, filename, ComfyClient.MimeFor(filename), overwrite: overwrite, cancellationToken: cancellationToken);
             return new { success = true, name = upload.Name, subfolder = upload.Subfolder, type = upload.Type, workflow_value = upload.WorkflowValue };
         }
         catch (Exception ex) when (!cancellationToken.IsCancellationRequested) { return new { success = false, error = ex.Message }; }
+    }
+
+    [McpServerTool(Name = "asset_stage"), Description("Save base64-encoded or data-URL media supplied by an MCP client to the managed assets directory. Use the returned filename with comfy_media_upload.")]
+    public async Task<object> AssetStage(
+        [Description("Raw base64 data or a base64 data URL, such as data:image/png;base64,...")] string data,
+        [Description("Optional original filename. A safe unique filename is created.")] string? filename = null,
+        [Description("Optional MIME type. Inferred from a data URL when omitted.")] string? mime_type = null,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var asset = await mediaAssets.StageAsync(data, filename, mime_type, cancellationToken);
+            return new { success = true, filename = asset.Filename, mime_type = asset.MimeType, bytes = asset.Bytes };
+        }
+        catch (Exception ex) when (!cancellationToken.IsCancellationRequested) { return new { success = false, error = ex.Message }; }
+    }
+
+    [McpServerTool(Name = "asset_list"), Description("List media staged with asset_stage in the managed assets directory.")]
+    public object AssetList()
+    {
+        var assets = mediaAssets.ListAssets();
+        return new
+        {
+            assets = assets.Select(asset => new { filename = asset.Filename, mime_type = asset.MimeType, bytes = asset.Bytes }),
+            count = assets.Count
+        };
+    }
+
+    [McpServerTool(Name = "asset_exists"), Description("Check whether a filename exists in the managed assets directory.")]
+    public object AssetExists(
+        [Description("A filename only, without directory components.")] string filename)
+    {
+        try
+        {
+            var path = mediaAssets.Find(filename);
+            return new { exists = path is not null, filename };
+        }
+        catch (Exception ex) { return new { exists = false, filename, error = ex.Message }; }
     }
 
     [McpServerTool(Name = "comfy_job_cancel"), Description("Best-effort cancellation of one pending or currently running ComfyUI prompt.")]
@@ -152,6 +191,17 @@ public sealed class ComfyTools(
         catch (Exception ex) when (!cancellationToken.IsCancellationRequested) { return new { error = ex.Message }; }
     }
 
+    [McpServerTool(Name = "comfy_diffusion_model_list"), Description("List diffusion models installed and available to ComfyUI.")]
+    public async Task<object> ComfyDiffusionModelList(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var models = await client.GetDiffusionModelsAsync(cancellationToken);
+            return new { models, count = models.Count };
+        }
+        catch (Exception ex) when (!cancellationToken.IsCancellationRequested) { return new { error = ex.Message }; }
+    }
+
     [McpServerTool(Name = "comfy_queue_clear"), Description("Clear pending ComfyUI jobs without interrupting the running job.")]
     public async Task<object> ComfyQueueClear(CancellationToken cancellationToken = default)
     {
@@ -170,9 +220,7 @@ public sealed class ComfyTools(
                 throw new InvalidOperationException($"Workflow '{workflowId}' is configured for {resolved.MediaType}, not {mediaType}.");
             var rendered = workflows.RenderResolved(workflowId, resolved.Values);
             var completed = await execution.RunAsync(rendered, mediaType, cancellationToken);
-            var savedPath = string.Equals(mediaType, "image", StringComparison.OrdinalIgnoreCase)
-                ? await generatedImages.SaveAsync(completed, cancellationToken)
-                : null;
+            var savedPath = await generatedMedia.SaveAsync(completed, cancellationToken);
             return MediaResult(completed, workflowId, savedPath);
         }
         catch (GenerationParameterException ex)
@@ -282,7 +330,7 @@ public sealed class ComfyTools(
                 filename = completed.Output.Filename,
                 mime_type = completed.MimeType,
                 saved_path = savedPath,
-                input_filename = savedPath is null ? null : Path.GetFileName(savedPath)
+                output_filename = savedPath is null ? null : Path.GetFileName(savedPath)
             }),
             Content =
             [
@@ -291,7 +339,7 @@ public sealed class ComfyTools(
                 {
                     Text = savedPath is null
                         ? $"Completed workflow '{workflowId}' as prompt {completed.PromptId}; returning {completed.Output.Filename}."
-                        : $"Completed workflow '{workflowId}' as prompt {completed.PromptId}; returning {completed.Output.Filename} and saved a reusable copy to {savedPath}."
+                        : $"Completed workflow '{workflowId}' as prompt {completed.PromptId}; returning {completed.Output.Filename} and saved a copy to {savedPath}."
                 }
             ]
         };

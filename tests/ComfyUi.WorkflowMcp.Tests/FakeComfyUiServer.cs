@@ -23,6 +23,11 @@ internal sealed class FakeComfyUiServer(
     FakeGenerationOutcome outcome = FakeGenerationOutcome.Success) :
     IAsyncDisposable
 {
+    private static readonly string[] DiffusionModels =
+    [
+        "flux1-dev.safetensors",
+        "sd3.5_large.safetensors"
+    ];
     private readonly WebApplication _app = BuildApplication();
     private readonly Channel<WebSocket> _sockets =
         Channel.CreateUnbounded<WebSocket>();
@@ -45,6 +50,7 @@ internal sealed class FakeComfyUiServer(
             queue_running = Array.Empty<object>(),
             queue_pending = Array.Empty<object>()
         }));
+        _app.MapGet("/models/diffusion_models", () => Results.Json(DiffusionModels));
         _app.MapPost("/queue", () => Results.Json(new { success = true }));
         _app.MapPost("/interrupt", () => Results.Json(new { success = true }));
         _app.MapGet(

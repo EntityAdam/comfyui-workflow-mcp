@@ -10,11 +10,10 @@ public sealed class ComfyConfigurationTests
         var configuration = TestConfiguration.Create();
 
         Assert.Equal(
-            Path.Combine(AppContext.BaseDirectory, "input"),
-            configuration.InputRoot());
-        Assert.Equal(
             Path.Combine(AppContext.BaseDirectory, "workflows"),
             configuration.WorkflowDirectory());
+        Assert.Equal(Path.Combine(AppContext.BaseDirectory, "assets"), configuration.AssetsRoot());
+        Assert.Equal(Path.Combine(AppContext.BaseDirectory, "output"), configuration.OutputRoot());
     }
 
     [Fact]
@@ -26,7 +25,8 @@ public sealed class ComfyConfigurationTests
 
         Assert.Equal(temp.Path, configuration.Directory());
         Assert.Equal(Path.Combine(temp.Path, "workflows"), configuration.WorkflowDirectory());
-        Assert.Equal(Path.Combine(temp.Path, "input"), configuration.InputRoot());
+        Assert.Equal(Path.Combine(temp.Path, "assets"), configuration.AssetsRoot());
+        Assert.Equal(Path.Combine(temp.Path, "output"), configuration.OutputRoot());
         Assert.Equal(Path.Combine(temp.Path, "settings.yaml"),
             new WorkflowConfigurationManager(configuration).SettingsPath);
     }

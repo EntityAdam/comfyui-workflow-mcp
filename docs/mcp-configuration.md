@@ -89,9 +89,9 @@ MCP server. Do not append an API path.
 
 ## Local input media
 
-`<ComfyWorkflowMcp__Directory>/input` is the filesystem boundary. The server
-does not scan it and opens only a path explicitly supplied to
-`comfy_media_upload()`.
+`<ComfyWorkflowMcp__Directory>/assets` is the filesystem boundary. Use
+`asset_stage()` to save client-supplied media there; call
+`comfy_media_upload()` with only its returned filename.
 
 On Windows, JSON paths must use escaped backslashes such as
 `"C:\\ComfyUI\\input"`, or forward slashes such as `"C:/ComfyUI/input"`.

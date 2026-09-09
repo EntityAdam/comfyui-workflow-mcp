@@ -18,6 +18,9 @@ The workflow-facing tools are:
 Direct ComfyUI interaction is limited to:
 
 - `comfy_media_upload()`
+- `asset_stage()`
+- `asset_list()`
+- `asset_exists()`
 - `comfy_job_cancel()`
 - `comfy_queue_list()`
 - `comfy_queue_clear()`
@@ -65,9 +68,8 @@ audio, and video generation.
 ## Input media
 
 `comfy_media_upload()` sends image, audio, and video references through
-ComfyUI's upload endpoint. Local paths are constrained to the configured input
-root, which defaults to a dedicated `input` directory beside the executable.
-The server does not enumerate that directory.
+ComfyUI's upload endpoint. Local paths must be in `assets`, created by
+`asset_stage`, beside the executable.
 
 ## Trust model
 

@@ -17,6 +17,9 @@ public static class ComfyConfiguration
     public static string WorkflowDirectory(this IConfiguration configuration) =>
         Path.Combine(configuration.Directory(), "workflows");
 
-    public static string InputRoot(this IConfiguration configuration) =>
-        Path.Combine(configuration.Directory(), "input");
+    public static string AssetsRoot(this IConfiguration configuration) =>
+        Path.Combine(configuration.Directory(), "assets");
+
+    public static string OutputRoot(this IConfiguration configuration) =>
+        Path.Combine(configuration.Directory(), "output");
 }

@@ -96,10 +96,9 @@ the tool queues the workflow on ComfyUI and returns its prompt ID without
 waiting for media. The wait and submit paths are internal APIs, not separate
 MCP tools.
 
-Completed `generate_image()` calls also save a uniquely named copy under the
-configured root's `input` subdirectory. The result includes `saved_path` and
-`input_filename` so the image can be reused as a later workflow input. Submit-only
-calls do not save a local copy.
+Completed generation calls save a uniquely named copy under the configured
+root's `output` subdirectory. The result includes `saved_path` and
+`output_filename`. Submit-only calls do not save a local copy.
 
 If a workflow produces more than one output, the server returns only the first
 output matching the requested media type.
@@ -108,6 +107,10 @@ output matching the requested media type.
 
 - `comfy_media_upload()` uploads an image, audio file, or video through
   ComfyUI's upload endpoint.
+- `asset_stage()` saves base64 client media in `assets/` for upload.
+- `asset_list()` lists media staged in `assets/`.
+- `asset_exists()` validates a filename in `assets/`.
+- `comfy_diffusion_model_list()` lists installed diffusion models.
 - `comfy_job_cancel()` attempts to cancel a running job.
 - `comfy_queue_list()` reports running and pending jobs.
 - `comfy_queue_clear()` removes pending jobs from the queue.
@@ -118,13 +121,13 @@ remains a ComfyUI job.
 
 ## Input media
 
-Local uploads are limited to the `input` subdirectory of
-`ComfyWorkflowMcp__Directory`. The directory is not bundled or scanned: the
-server reads only the exact path supplied to
+Local uploads are limited to the `assets` subdirectory of
+`ComfyWorkflowMcp__Directory`. Use `asset_stage()` to write client-provided
+base64 media there; the server reads only the exact path supplied to
 `comfy_media_upload()`.
 
 Set `ComfyWorkflowMcp__Directory` to the root that should contain
-`settings.yaml`, `workflows`, and `input`. See
+`settings.yaml`, `workflows`, `assets`, and `output`. See
 [Configuration](docs/configuration.md) for details.
 
 ## How-to guides

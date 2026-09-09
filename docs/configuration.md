@@ -9,34 +9,34 @@ variables replace `:` with `__`:
 - `ComfyWorkflowMcp__ServerUrl` — public MCP server URL; default
   `http://localhost:9001`
 - `ComfyWorkflowMcp__Directory` — root for `settings.yaml`, workflows, workflow
-  YAML, and input media; default is the directory containing the executable
+YAML, staged assets, and generated output; default is the directory containing the executable
 
 These directories are not bundled. The server can start while ComfyUI is
 offline, but uploads, queue operations, and generation require ComfyUI.
 
-## Input media
+## Media assets
 
 `comfy_media_upload` accepts an image, audio file, or video and sends it through
 ComfyUI's upload endpoint. A local file must be inside
-`<ComfyWorkflowMcp__Directory>/input`:
+`<ComfyWorkflowMcp__Directory>/assets`:
 
 ```json
 {
-  "file_path": "/absolute/path/to/input/source.mp4"
+  "filename": "source.mp4"
 }
 ```
 
-The server does not scan the input directory. It opens only the exact file
-supplied to the tool. Place or copy selectable media under the configured
-root's `input` subdirectory.
+Use `asset_stage()` to save base64/data-URL client media under `assets`.
+`asset_list()` enumerates staged assets, and `asset_exists()` validates an asset
+filename before it is uploaded.
 
 The returned `workflow_value` can be passed to a parameter such as
 `input_image`, `reference_image`, `input_audio`, or `input_video`.
 
-When `generate_image()` waits for completion, its returned image is also saved
-under this `input` directory with a unique filename. The structured result
-contains both `saved_path` and `input_filename`. Fire-and-forget submissions do
-not save anything locally.
+When a generation tool waits for completion, its returned media is also saved
+under `output` with a unique filename. The structured result contains both
+`saved_path` and `output_filename`. Fire-and-forget submissions do not save
+anything locally.
 
 ## Workflow discovery
 

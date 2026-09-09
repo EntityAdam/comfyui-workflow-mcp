@@ -8,6 +8,23 @@ namespace ComfyUi.WorkflowMcp.Tests;
 public sealed class ComfyClientTests
 {
     [Fact]
+    public async Task DiffusionModelListUsesComfyUiModelsEndpoint()
+    {
+        string? path = null;
+        var handler = new AsyncHandler(request =>
+        {
+            path = request.RequestUri!.AbsolutePath;
+            return Task.FromResult(Json("""["flux1-dev.safetensors","sd3.5_large.safetensors"]"""));
+        });
+        using var http = new HttpClient(handler);
+
+        var models = await Create(http).GetDiffusionModelsAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal("/models/diffusion_models", path);
+        Assert.Equal(["flux1-dev.safetensors", "sd3.5_large.safetensors"], models);
+    }
+
+    [Fact]
     public async Task MediaUploadUsesComfyUiUploadEndpointForVideo()
     {
         string? path = null;
