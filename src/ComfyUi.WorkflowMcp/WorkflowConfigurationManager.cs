@@ -15,7 +15,7 @@ public sealed partial class WorkflowConfigurationManager(IConfiguration configur
         var path = WorkflowConfigPath(workflowId);
         var root = LoadDocument(path);
         var defaults = Object(root["defaults"]);
-        // Accept preview5 files while setup rewrites them to the simplified schema.
+        // Accept preview5 files while configuration updates migrate their schema.
         if (root["model"] is { } legacyModel && defaults["model"] is null)
             defaults["model"] = legacyModel.DeepClone();
         var allowed = Object(root["allowed_values"]);
@@ -41,33 +41,32 @@ public sealed partial class WorkflowConfigurationManager(IConfiguration configur
             workflow_directory = workflows.DirectoryPath,
             directory = RootDirectory,
             default_workflows = defaults,
-            workflows = workflows.Catalog(),
+            workflow_count = workflows.Catalog().Count,
+            asset_guide = "For existing media, call asset_list and pass its filename to asset_view or comfy_media_upload. asset_stage is only for bytes supplied directly by the client; never generate or reproduce base64.",
             parameterization_guide = new
             {
                 json_shape = "The root object is keyed by node ID. Each node normally contains class_type, inputs, and optional _meta. Inspect node.inputs for literal values to expose. An array such as [\"105:104\", 0] links another node's output and should not be parameterized as a literal.",
                 common_input_names = new[] { "cfg", "steps", "width", "height", "prompt", "negative", "negative_prompt" },
                 discovery = new[]
                 {
-                    "Call workflow_list to discover workflow IDs, then call workflow_get with the required workflow_id to retrieve its JSON.",
+                    "Call workflow_list for IDs and summaries, workflow_get_options for one workflow's parameters and configuration, or workflow_get for its JSON.",
                     "Search every node's inputs object for common names and other values users may need to change.",
                     "Record the exact top-level node ID and exact input key. Node IDs may contain colons.",
-                    "Choose a stable public parameter name and the matching type: string, integer, number, or boolean.",
-                    "Call setup with operation parameterize_workflow, the workflow_id, and only the mappings to add or change. Calls are additive: existing PARAM_* bindings remain in the JSON, and multiple parameters may also be submitted together.",
-                    "Call setup with configure_workflow to record media_type, defaults, allowed_values, and constraints in YAML. Updates merge by parameter name; send only new or changed entries, never repeat unchanged defaults. Constraint objects merge by rule name; arrays replace the named parameter's allowed values. A null entry removes that entry; omitted entries and empty objects preserve existing configuration. Then verify with workflow_get_options.",
-                    "To remove parameterization, call setup with operation unparameterize_workflow and parameter_names, for example [\"cfg\"]. Every binding is restored to the parameter's current YAML default, and its defaults, allowed_values, and constraints are removed. All selected parameters must have valid defaults; otherwise nothing is changed. To remove only a default while keeping its placeholder, use configure_workflow with defaults: {\"cfg\": null}."
+                    "Choose a stable public parameter name and the matching type: string, integer, number, or boolean. Use workflow_set_default to select a default for a media type.",
+                    "Call workflow_parameterize with workflow_id and only new or changed parameter mappings. Existing bindings remain unchanged.",
+                    "Call workflow_configure to set media_type, defaults, allowed_values, constraints, and description. Updates merge: send only changes. Omitted entries stay unchanged; null removes an entry. Constraints merge by rule; allowed-value arrays replace the named list.",
+                    "Call workflow_unparameterize with parameter_names, for example [\"cfg\"], to restore current YAML defaults as fixed inputs and remove their configuration. Valid defaults are required. To keep the binding but remove its default, call workflow_configure with defaults: {\"cfg\": null}."
                 },
-                parameterize_workflow_example = new
+                parameterize_example = new
                 {
-                    operation = "parameterize_workflow",
-                    workflow_id = "example_workflow",
-                    parameters = new Dictionary<string, object>
+                    tool = "workflow_parameterize",
+                    arguments = new
                     {
-                        ["prompt"] = new { node_id = "6", input_name = "text", type = "string" },
-                        ["negative_prompt"] = new { node_id = "7", input_name = "text", type = "string" },
-                        ["cfg"] = new { node_id = "3", input_name = "cfg", type = "number" },
-                        ["steps"] = new { node_id = "3", input_name = "steps", type = "integer" },
-                        ["width"] = new { node_id = "5", input_name = "width", type = "integer" },
-                        ["height"] = new { node_id = "5", input_name = "height", type = "integer" }
+                        workflow_id = "example_workflow",
+                        parameters = new Dictionary<string, object>
+                        {
+                            ["cfg"] = new { node_id = "3", input_name = "cfg", type = "number" }
+                        }
                     }
                 }
             }
@@ -132,6 +131,9 @@ public sealed partial class WorkflowConfigurationManager(IConfiguration configur
             ?? throw new ArgumentException($"Workflow '{workflowId}' not found.");
         foreach (var (parameterName, specificationNode) in parameters)
         {
+            var normalizedName = Normalize(parameterName);
+            if (normalizedName.Length == 0 || !char.IsAsciiLetter(normalizedName[0]))
+                throw new ArgumentException($"Parameter '{parameterName}' must start with a letter after normalization.");
             var specification = specificationNode as JsonObject
                 ?? throw new ArgumentException($"Parameter '{parameterName}' must be an object.");
             var nodeId = specification["node_id"]?.ToString()
@@ -165,7 +167,7 @@ public sealed partial class WorkflowConfigurationManager(IConfiguration configur
             if (!parameters.TryGetValue(name, out var parameter))
                 throw new ArgumentException($"Workflow '{workflowId}' has no parameter '{name}'.");
             var value = validation.Defaults[name] as JsonValue
-                ?? throw new ArgumentException($"Parameter '{name}' requires a scalar YAML default before removing parameterization. Set it with configure_workflow first.");
+                ?? throw new ArgumentException($"Parameter '{name}' requires a scalar YAML default before removing parameterization. Set it with workflow_configure first.");
             ValidateValue(name, value, validation);
             WorkflowManager.RestoreParameterDefault(workflow, parameter, value);
         }

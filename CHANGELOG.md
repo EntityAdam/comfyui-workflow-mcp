@@ -4,14 +4,22 @@
 
 ### Changed
 
-- Setup YAML updates merge defaults and allowed-value lists by parameter and
+- `setup()` is now a read-only, no-argument guide. Workflow edits use
+  `workflow_configure`, `workflow_parameterize`, `workflow_unparameterize`, and
+  `workflow_set_default`, with compact change receipts. Existing clients must
+  refresh tool schemas and migrate old setup mutation calls.
+- `workflow_list()` returns only workflow IDs, descriptions, and media types;
+  detailed parameters and validation remain in `workflow_get_options()`.
+- Asset instructions favor `asset_list()` and filenames for existing media;
+  `asset_stage()` is reserved for bytes supplied directly by the client.
+- Workflow YAML updates merge defaults and allowed-value lists by parameter and
   constraints by rule; omitted entries are preserved, and null entries remove
   specific configuration. Tool descriptions explain incremental updates.
 - `asset_list()` now omits files without recognized image, video, or audio
   extensions. AVI files are recognized as `video/x-msvideo`.
 - `setup()` now teaches clients how to parse ComfyUI API workflow JSON,
   discover common configurable inputs, and make additive
-  `parameterize_workflow` calls without repeating existing bindings.
+  `workflow_parameterize` calls without repeating existing bindings.
 - Consolidated workflow, YAML, settings, and input paths under the single
   `ComfyWorkflowMcp__Directory` setting. `settings.yaml` lives at the root;
   workflow JSON and YAML share `workflows`; uploads are limited to `input`.
@@ -34,10 +42,10 @@
 
 ### Added
 
-- `setup(operation: "unparameterize_workflow", parameter_names: [...])`
+- `workflow_unparameterize(workflow_id, parameter_names)`
   restores selected bindings to their current YAML defaults and removes their
   defaults, allowed values, and constraints after validating all selections.
-- Workflow YAML supports an optional `description`, editable through setup
+- Workflow YAML supports an optional `description`, editable through `workflow_configure`
   and returned by `workflow_list()` and `workflow_get_options()`.
 - `asset_view(filename)` returns images from `assets/` as standard MCP image
   content, with filename, MIME type, and byte-count metadata. Added LM Studio

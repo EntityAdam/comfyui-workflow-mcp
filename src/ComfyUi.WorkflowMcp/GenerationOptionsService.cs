@@ -62,7 +62,7 @@ public sealed class GenerationOptionsService(
             if (values[parameter.Name] is null && parameter.Name == "seed" && parameter.Type == typeof(long))
                 values[parameter.Name] = Random.Shared.NextInt64(0, long.MaxValue);
             if (values[parameter.Name] is null)
-                throw new GenerationParameterException(parameter.Name, $"No value was provided for '{parameter.Name}'. Run setup to configure a default or supply it in the tool call.");
+                throw new GenerationParameterException(parameter.Name, $"No value was provided for '{parameter.Name}'. Use workflow_configure to set a default or supply it in the tool call.");
             configuration.ValidateValue(parameter.Name, values[parameter.Name]!, validation);
         }
         return new ResolvedWorkflowExecution(workflowId, validation.MediaType, values);

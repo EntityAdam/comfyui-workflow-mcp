@@ -79,7 +79,8 @@ MCP server.
 
 Only include settings that differ from their defaults. The package does not
 include workflow JSON, YAML configuration, or input media. Put workflow JSON
-under the root's `workflows` subdirectory and run `setup()` to configure it.
+under the root's `workflows` subdirectory and call `setup()` for configuration
+guidance. Use the focused workflow tools to apply changes.
 
 ## ComfyUI at another URL
 
