@@ -33,6 +33,10 @@ public sealed partial class MediaAssetStore(IConfiguration configuration)
         var root = configuration.AssetsRoot();
         if (!Directory.Exists(root)) return [];
         return Directory.EnumerateFiles(root, "*", SearchOption.TopDirectoryOnly)
+            .Where(path => ComfyClient.MimeFor(path) is var mimeType &&
+                (mimeType.StartsWith("image/", StringComparison.Ordinal) ||
+                 mimeType.StartsWith("video/", StringComparison.Ordinal) ||
+                 mimeType.StartsWith("audio/", StringComparison.Ordinal)))
             .OrderBy(path => Path.GetFileName(path), StringComparer.OrdinalIgnoreCase)
             .Select(path => new StoredMediaAsset(path, Path.GetFileName(path), ComfyClient.MimeFor(path), new FileInfo(path).Length))
             .ToArray();

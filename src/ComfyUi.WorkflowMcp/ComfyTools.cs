@@ -148,7 +148,7 @@ public sealed class ComfyTools(
         catch (Exception ex) when (!cancellationToken.IsCancellationRequested) { return new { success = false, error = ex.Message }; }
     }
 
-    [McpServerTool(Name = "asset_list"), Description("List media staged with asset_stage in the managed assets directory.")]
+    [McpServerTool(Name = "asset_list"), Description("List recognized image, video, and audio files in the managed assets directory. Other file types are omitted; media types are inferred from filename extensions.")]
     public object AssetList()
     {
         var assets = mediaAssets.ListAssets();
