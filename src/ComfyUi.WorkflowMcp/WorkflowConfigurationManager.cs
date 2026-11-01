@@ -15,7 +15,7 @@ public sealed partial class WorkflowConfigurationManager(IConfiguration configur
         var path = WorkflowConfigPath(workflowId);
         var root = LoadDocument(path);
         var defaults = Object(root["defaults"]);
-        // Accept preview5 files while setup rewrites them to the simplified schema.
+        // Accept preview5 files while configuration updates migrate their schema.
         if (root["model"] is { } legacyModel && defaults["model"] is null)
             defaults["model"] = legacyModel.DeepClone();
         var allowed = Object(root["allowed_values"]);
@@ -41,32 +41,32 @@ public sealed partial class WorkflowConfigurationManager(IConfiguration configur
             workflow_directory = workflows.DirectoryPath,
             directory = RootDirectory,
             default_workflows = defaults,
-            workflows = workflows.Catalog(),
+            workflow_count = workflows.Catalog().Count,
+            asset_guide = "For existing media, call asset_list and pass its filename to asset_view or comfy_media_upload. asset_stage is only for bytes supplied directly by the client; never generate or reproduce base64.",
             parameterization_guide = new
             {
                 json_shape = "The root object is keyed by node ID. Each node normally contains class_type, inputs, and optional _meta. Inspect node.inputs for literal values to expose. An array such as [\"105:104\", 0] links another node's output and should not be parameterized as a literal.",
                 common_input_names = new[] { "cfg", "steps", "width", "height", "prompt", "negative", "negative_prompt" },
                 discovery = new[]
                 {
-                    "Call workflow_list to discover workflow IDs, then call workflow_get with the required workflow_id to retrieve its JSON.",
+                    "Call workflow_list for IDs and summaries, workflow_get_options for one workflow's parameters and configuration, or workflow_get for its JSON.",
                     "Search every node's inputs object for common names and other values users may need to change.",
                     "Record the exact top-level node ID and exact input key. Node IDs may contain colons.",
-                    "Choose a stable public parameter name and the matching type: string, integer, number, or boolean.",
-                    "Call setup with operation parameterize_workflow, the workflow_id, and only the mappings to add or change. Calls are additive: existing PARAM_* bindings remain in the JSON, and multiple parameters may also be submitted together.",
-                    "Call setup with configure_workflow to record media_type, defaults, allowed_values, and constraints in YAML. Then verify with workflow_get_options."
+                    "Choose a stable public parameter name and the matching type: string, integer, number, or boolean. Use workflow_set_default to select a default for a media type.",
+                    "Call workflow_parameterize with workflow_id and only new or changed parameter mappings. Existing bindings remain unchanged.",
+                    "Call workflow_configure to set media_type, defaults, allowed_values, constraints, and description. Updates merge: send only changes. Omitted entries stay unchanged; null removes an entry. Constraints merge by rule; allowed-value arrays replace the named list.",
+                    "Call workflow_unparameterize with parameter_names, for example [\"cfg\"], to restore current YAML defaults as fixed inputs and remove their configuration. Valid defaults are required. To keep the binding but remove its default, call workflow_configure with defaults: {\"cfg\": null}."
                 },
-                parameterize_workflow_example = new
+                parameterize_example = new
                 {
-                    operation = "parameterize_workflow",
-                    workflow_id = "example_workflow",
-                    parameters = new Dictionary<string, object>
+                    tool = "workflow_parameterize",
+                    arguments = new
                     {
-                        ["prompt"] = new { node_id = "6", input_name = "text", type = "string" },
-                        ["negative_prompt"] = new { node_id = "7", input_name = "text", type = "string" },
-                        ["cfg"] = new { node_id = "3", input_name = "cfg", type = "number" },
-                        ["steps"] = new { node_id = "3", input_name = "steps", type = "integer" },
-                        ["width"] = new { node_id = "5", input_name = "width", type = "integer" },
-                        ["height"] = new { node_id = "5", input_name = "height", type = "integer" }
+                        workflow_id = "example_workflow",
+                        parameters = new Dictionary<string, object>
+                        {
+                            ["cfg"] = new { node_id = "3", input_name = "cfg", type = "number" }
+                        }
                     }
                 }
             }
@@ -77,7 +77,7 @@ public sealed partial class WorkflowConfigurationManager(IConfiguration configur
     {
         var normalizedType = NormalizeMediaType(mediaType);
         if (workflows.Load(workflowId) is null)
-            throw new ArgumentException($"Workflow '{workflowId}' not found.");
+            throw ToolFailureException.WorkflowNotFound(workflowId);
         var settings = LoadDocument(SettingsPath);
         var defaults = Object(settings["default_workflows"]);
         defaults[normalizedType] = workflowId;
@@ -97,6 +97,13 @@ public sealed partial class WorkflowConfigurationManager(IConfiguration configur
     {
         var path = WorkflowConfigPath(workflowId);
         var document = LoadDocument(path);
+        // Preserve legacy model defaults when applying incremental updates.
+        if (document["model"] is { } legacyModel)
+        {
+            var existingDefaults = Object(document["defaults"]);
+            if (existingDefaults["model"] is null) existingDefaults["model"] = legacyModel.DeepClone();
+            document["defaults"] = existingDefaults;
+        }
         if (description is not null)
         {
             if (string.IsNullOrWhiteSpace(description)) document.Remove("description");
@@ -108,9 +115,9 @@ public sealed partial class WorkflowConfigurationManager(IConfiguration configur
             document["media_type"] = NormalizeMediaType(mediaType);
         if (waitForCompletion is not null)
             document["wait_for_completion"] = waitForCompletion.Value;
-        if (defaults is not null) document["defaults"] = defaults.DeepClone();
-        if (allowedValues is not null) document["allowed_values"] = allowedValues.DeepClone();
-        if (constraints is not null) document["constraints"] = constraints.DeepClone();
+        MergeSection(document, "defaults", defaults);
+        MergeSection(document, "allowed_values", allowedValues);
+        MergeSection(document, "constraints", constraints, recursive: true);
         SaveDocument(path, document);
         return path;
     }
@@ -121,9 +128,12 @@ public sealed partial class WorkflowConfigurationManager(IConfiguration configur
         WorkflowManager workflows)
     {
         var workflow = workflows.Load(workflowId)
-            ?? throw new ArgumentException($"Workflow '{workflowId}' not found.");
+            ?? throw ToolFailureException.WorkflowNotFound(workflowId);
         foreach (var (parameterName, specificationNode) in parameters)
         {
+            var normalizedName = Normalize(parameterName);
+            if (normalizedName.Length == 0 || !char.IsAsciiLetter(normalizedName[0]))
+                throw new ArgumentException($"Parameter '{parameterName}' must start with a letter after normalization.");
             var specification = specificationNode as JsonObject
                 ?? throw new ArgumentException($"Parameter '{parameterName}' must be an object.");
             var nodeId = specification["node_id"]?.ToString()
@@ -132,12 +142,81 @@ public sealed partial class WorkflowConfigurationManager(IConfiguration configur
                 ?? throw new ArgumentException($"Parameter '{parameterName}' requires input_name.");
             var type = specification["type"]?.ToString() ?? "string";
             if (workflow[nodeId]?["inputs"] is not JsonObject inputs || !inputs.ContainsKey(inputName))
-                throw new ArgumentException($"Workflow input '{nodeId}.{inputName}' was not found.");
+                throw new ToolFailureException("binding_not_found", $"Workflow input '{nodeId}.{inputName}' was not found.", "Read workflow_get and use an existing node_id and input_name.", parameterName);
             inputs[inputName] = Placeholder(parameterName, type);
         }
         var path = Path.Combine(workflows.DirectoryPath, SafeName(workflowId) + ".json");
         File.WriteAllText(path, workflow.ToJsonString(new() { WriteIndented = true }));
         return path;
+    }
+
+    public string UnparameterizeWorkflow(
+        string workflowId,
+        IReadOnlyList<string> parameterNames,
+        WorkflowManager workflows)
+    {
+        if (parameterNames.Count == 0)
+            throw new ArgumentException("parameter_names must contain at least one parameter.");
+        var workflow = workflows.Load(workflowId)
+            ?? throw ToolFailureException.WorkflowNotFound(workflowId);
+        var parameters = workflows.ExtractParameters(workflow);
+        var validation = Load(workflowId);
+        var names = parameterNames.Select(Normalize).Distinct(StringComparer.Ordinal).ToArray();
+        foreach (var name in names)
+        {
+            if (!parameters.TryGetValue(name, out var parameter))
+                throw ToolFailureException.UnknownParameter(workflowId, name);
+            var defaultValue = validation.Defaults[name] ?? throw ToolFailureException.MissingDefault(name);
+            var value = defaultValue as JsonValue
+                ?? throw new GenerationParameterException(name, $"Default for '{name}' must be a scalar value.", code: "invalid_default", nextStep: $"Set a scalar defaults.{name} with workflow_configure.");
+            try
+            {
+                ValidateValue(name, value, validation);
+                WorkflowManager.RestoreParameterDefault(workflow, parameter, value);
+            }
+            catch (ArgumentException ex)
+            {
+                throw new GenerationParameterException(name, ex.Message, (ex as GenerationParameterException)?.AllowedValues,
+                    "invalid_default", $"Set a valid defaults.{name} with workflow_configure.");
+            }
+        }
+        var remaining = workflows.ExtractParameters(workflow);
+        if (names.Any(remaining.ContainsKey))
+            throw new ArgumentException("A selected default contains a parameter placeholder. Supply a literal default before removing parameterization.");
+
+        var configPath = WorkflowConfigPath(workflowId);
+        var document = LoadDocument(configPath);
+        foreach (var name in names)
+        {
+            foreach (var section in new[] { "defaults", "allowed_values", "constraints" })
+                if (document[section] is JsonObject values) values.Remove(name);
+            if (name == "model") document.Remove("model");
+        }
+        var path = Path.Combine(workflows.DirectoryPath, SafeName(workflowId) + ".json");
+        var originalWorkflow = File.ReadAllText(path);
+        // Validate all selected parameters before writing either file.
+        File.WriteAllText(path, workflow.ToJsonString(new() { WriteIndented = true }));
+        try { SaveDocument(configPath, document); }
+        catch
+        {
+            File.WriteAllText(path, originalWorkflow);
+            throw;
+        }
+        return path;
+    }
+
+    private static void MergeSection(JsonObject document, string name, JsonObject? changes, bool recursive = false)
+    {
+        if (changes is null || changes.Count == 0) return;
+        var values = Object(document[name]);
+        foreach (var (key, value) in changes)
+        {
+            if (value is null) values.Remove(key);
+            else if (recursive && value is JsonObject rules)
+                MergeSection(values, key, rules, recursive: true);
+            else values[key] = value.DeepClone();
+        }
+        document[name] = values;
     }
 
     public void ValidateValue(string name, JsonNode value, WorkflowValidation validation)
@@ -182,7 +261,7 @@ public sealed partial class WorkflowConfigurationManager(IConfiguration configur
         var normalized = Normalize(value);
         return normalized is "image" or "audio" or "video"
             ? normalized
-            : throw new ArgumentException("media_type must be image, audio, or video.");
+            : throw new ToolFailureException("invalid_media_type", "media_type must be image, audio, or video.", "Use image, audio, or video for media_type.");
     }
 
     private static string SafeName(string value)

@@ -7,8 +7,11 @@ Attach an image and ask your agent:
 
 The agent should:
 
-1. Call `asset_stage()` with the attachment's base64 data, then call
-   `comfy_media_upload()` with its returned filename.
+1. Call `asset_list()` to find the existing asset, then call
+   `comfy_media_upload()` with its filename. For new attachments, the client
+   can supply bytes directly through `asset_stage()`; the agent must never
+   generate or reproduce base64. If the client cannot supply bytes directly,
+   place the file in `assets/` first.
 2. Call `workflow_list()` if no edit workflow ID or image default is known.
 3. Call `generate_image()` with the selected `workflow_id`, the returned
    `workflow_value`, and the edit prompt.
@@ -18,5 +21,5 @@ The agent should:
 If the workflow accepts a reference image, upload that file separately and pass
 its `workflow_value` to the matching parameter.
 
-The attachment must be under `<ComfyWorkflowMcp__Directory>/input`. See
-[Configuration](../configuration.md#input-media).
+The attachment must be under `<ComfyWorkflowMcp__Directory>/assets`. See
+[Configuration](../configuration.md#media-assets).

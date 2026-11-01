@@ -5,9 +5,10 @@ namespace ComfyUi.WorkflowMcp;
 public sealed class GenerationParameterException(
     string parameter,
     string message,
-    IReadOnlyList<string>? allowedValues = null) : ArgumentException(message)
+    IReadOnlyList<string>? allowedValues = null,
+    string code = "invalid_value",
+    string? nextStep = null) : ToolFailureException(code, message, nextStep ?? $"Read workflow_get_options and correct the value for '{parameter}'.", parameter)
 {
-    public string Parameter { get; } = parameter;
     public IReadOnlyList<string> AllowedValues { get; } = allowedValues ?? [];
 }
 
@@ -18,7 +19,7 @@ public sealed class GenerationOptionsService(
     public object GetOptions(string workflowId)
     {
         var workflow = workflows.Load(workflowId)
-            ?? throw new ArgumentException($"Workflow '{workflowId}' not found.");
+            ?? throw ToolFailureException.WorkflowNotFound(workflowId);
         var validation = configuration.Load(workflowId);
         var parameters = workflows.ExtractParameters(workflow);
         return new
@@ -33,6 +34,7 @@ public sealed class GenerationOptionsService(
             parameters = parameters.Values.ToDictionary(parameter => parameter.Name, parameter => new
             {
                 type = TypeName(parameter.Type),
+                bindings = parameter.Bindings.Select(binding => new { node_id = binding.NodeId, input_name = binding.InputName }).Distinct().ToArray(),
                 required = validation.Constraints[parameter.Name]?["required"]?.GetValue<bool?>()
                     ?? validation.Defaults[parameter.Name] is null,
                 @default = validation.Defaults[parameter.Name],
@@ -45,7 +47,7 @@ public sealed class GenerationOptionsService(
     public ResolvedWorkflowExecution Resolve(string workflowId, JsonObject callValues)
     {
         var workflow = workflows.Load(workflowId)
-            ?? throw new ArgumentException($"Workflow '{workflowId}' not found.");
+            ?? throw ToolFailureException.WorkflowNotFound(workflowId);
         var validation = configuration.Load(workflowId);
         var parameters = workflows.ExtractParameters(workflow);
         var values = validation.Defaults.DeepClone().AsObject();
@@ -55,14 +57,14 @@ public sealed class GenerationOptionsService(
         var unknown = values.Select(pair => pair.Key)
             .Where(key => !parameters.ContainsKey(key)).ToArray();
         if (unknown.Length > 0)
-            throw new GenerationParameterException(unknown[0], $"Workflow '{workflowId}' has no parameter '{unknown[0]}'.");
+            throw ToolFailureException.UnknownParameter(workflowId, unknown[0]);
 
         foreach (var parameter in parameters.Values)
         {
             if (values[parameter.Name] is null && parameter.Name == "seed" && parameter.Type == typeof(long))
                 values[parameter.Name] = Random.Shared.NextInt64(0, long.MaxValue);
             if (values[parameter.Name] is null)
-                throw new GenerationParameterException(parameter.Name, $"No value was provided for '{parameter.Name}'. Run setup to configure a default or supply it in the tool call.");
+                throw new GenerationParameterException(parameter.Name, $"No value was provided for '{parameter.Name}'.", code: "missing_default", nextStep: $"Set defaults.{parameter.Name} with workflow_configure.");
             configuration.ValidateValue(parameter.Name, values[parameter.Name]!, validation);
         }
         return new ResolvedWorkflowExecution(workflowId, validation.MediaType, values);

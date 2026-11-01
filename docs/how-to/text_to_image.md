@@ -15,5 +15,5 @@ The agent should:
    the client.
 
 If there is no default and no `workflow_id` is provided, `generate_image()`
-recommends running `setup()`. Setup can parameterize a copied ComfyUI workflow,
+recommends `workflow_set_default()`. The workflow tools can parameterize a copied ComfyUI workflow,
 record YAML validation constraints, and save it as the image default.

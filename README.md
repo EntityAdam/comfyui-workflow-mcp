@@ -52,25 +52,34 @@ Ask:
 
 > Run `setup()` and help me configure ComfyUI Workflow MCP.
 
-Setup can inspect the configured root, parameterize ComfyUI API-format workflow
-exports, and save a default workflow
-for image, audio, or video generation. ComfyUI may be on the same machine or a
+`setup()` shows paths and a guide. The agent then uses focused workflow tools
+to configure API-format workflow exports and select defaults for image, audio,
+or video generation. ComfyUI may be on the same machine or a
 trusted local network.
 
 ## Setup
 
 The package does not include workflow or YAML files. During setup, the agent can:
 
-1. Inspect the configured root and discovered workflows.
-2. Configure YAML stored beside its workflow JSON.
-3. Edit a copied ComfyUI API-format JSON workflow and replace configurable node
-   inputs with typed parameters.
+1. Inspect paths with `setup()` and discover workflows with `workflow_list()`.
+2. Configure YAML with `workflow_configure()`.
+3. Replace configurable node inputs with typed parameters using
+   `workflow_parameterize()`.
 4. Add YAML defaults, allowed values, and constraints for parameters that
    ComfyUI validates only when a workflow runs.
-5. Save a default workflow for image, audio, or video generation.
+5. Select a default for image, audio, or video with `workflow_set_default()`.
 
 Source workflow files may be edited directly. They are expected to be copies
 exported from ComfyUI and do not require version-preserving transformations.
+
+Workflow configuration updates are additive: send only new or changed parameter bindings and
+YAML configuration entries. Existing defaults and validation rules are
+preserved unless explicitly updated or removed with `null`.
+`workflow_unparameterize(workflow_id: "portrait", parameter_names: ["cfg"])`
+restores the selected parameter's current YAML default as a fixed workflow input
+and removes its configuration. See [configuration](docs/configuration.md#incremental-yaml-configuration)
+for update and removal examples. Workflow edits return compact change receipts;
+`setup()` is read-only and takes no arguments.
 
 ## Tools
 
@@ -80,15 +89,15 @@ exported from ComfyUI and do not require version-preserving transformations.
 - `generate_audio()` runs an audio workflow.
 - `generate_video()` runs a video workflow.
 - `workflow_list()` lists discovered workflow IDs, descriptions from workflow
-  YAML when configured, and their parameters.
+  YAML when configured, and media types. Parameters and validation are returned
+  only by `workflow_get_options()`.
 - `workflow_get(workflow_id)` returns one API-format workflow JSON for node and
   input inspection; `workflow_id` is mandatory.
 - `workflow_get_options(workflow_id)` returns YAML-backed defaults, allowed
-  values, constraints, and discovered parameters for one workflow.
+  values, constraints, and discovered parameters with their node/input bindings.
 
-Each generation call requires `workflow_id` unless setup has saved a default
-for that media type. If neither is available, the tool recommends running
-`setup()`.
+Each generation call requires `workflow_id` unless `workflow_set_default()`
+has selected a default for that media type.
 
 Generation uses the workflow YAML's `wait_for_completion` value, defaulting to
 `true`, and returns media for the MCP client to display when waiting. Set the
@@ -104,11 +113,17 @@ root's `output` subdirectory. The result includes `saved_path` and
 If a workflow produces more than one output, the server returns only the first
 output matching the requested media type.
 
+Tool errors return `success: false`, a stable `error` code, a `message`, and
+one `next_step`. Parameter-specific errors also identify the parameter and
+include allowed values when available.
+
 ### ComfyUI controls
 
 - `comfy_media_upload()` uploads an image, audio file, or video through
   ComfyUI's upload endpoint.
-- `asset_stage()` saves base64 client media in `assets/` for upload.
+- `asset_stage()` saves media bytes supplied directly by the client in `assets/`.
+  Agents should use `asset_list()` and filenames for existing media and never
+  generate or reproduce base64.
 - `asset_list()` lists recognized image, video, and audio files in `assets/`
   by filename extension, omitting other files. Supported extensions are PNG,
   JPG/JPEG, WebP, GIF, MP4, AVI, WebM, MOV, MP3, WAV, FLAC, and OGG.
@@ -127,9 +142,10 @@ remains a ComfyUI job.
 ## Input media
 
 Local uploads are limited to the `assets` subdirectory of
-`ComfyWorkflowMcp__Directory`. Use `asset_stage()` to write client-provided
-base64 media there; the server reads only the exact path supplied to
-`comfy_media_upload()`.
+`ComfyWorkflowMcp__Directory`. Use `asset_list()` to find existing media and
+pass its filename to `comfy_media_upload()`. Clients can supply attachment bytes
+directly through `asset_stage()`; agents should not transcribe base64. When a
+client cannot supply bytes directly, place the file in `assets/`.
 
 Set `ComfyWorkflowMcp__Directory` to the root that should contain
 `settings.yaml`, `workflows`, `assets`, and `output`. See

@@ -60,7 +60,9 @@ public sealed partial class WorkflowManager(IConfiguration configuration, Workfl
             var value = values[parameter.Name]
                 ?? throw new ArgumentException(
                     $"No resolved value exists for parameter '{parameter.Name}'.");
-            var coerced = Coerce(value, parameter.Type);
+            JsonValue coerced;
+            try { coerced = Coerce(value, parameter.Type); }
+            catch (ArgumentException ex) { throw new GenerationParameterException(parameter.Name, ex.Message); }
             foreach (var binding in parameter.Bindings)
                 ApplyBinding(workflow, binding, coerced);
         }
@@ -114,6 +116,15 @@ public sealed partial class WorkflowManager(IConfiguration configuration, Workfl
         parameter.Bindings.Add(new WorkflowBinding(nodeId, inputName, token));
     }
 
+    internal static void RestoreParameterDefault(JsonObject workflow, WorkflowParameter parameter, JsonValue value)
+    {
+        if (value.TryGetValue<string>(out var text) && EmbeddedPlaceholderRegex().IsMatch(text))
+            throw new ArgumentException($"Default for '{parameter.Name}' contains a parameter placeholder. Supply a literal default before removing parameterization.");
+        var coerced = Coerce(value, parameter.Type);
+        foreach (var binding in parameter.Bindings)
+            ApplyBinding(workflow, binding, coerced);
+    }
+
     private static void ApplyBinding(
         JsonObject workflow,
         WorkflowBinding binding,
@@ -128,8 +139,8 @@ public sealed partial class WorkflowManager(IConfiguration configuration, Workfl
         var template = inputs[binding.InputName]?.ToString()
             ?? throw new InvalidOperationException(
                 $"Embedded placeholder input '{binding.NodeId}.{binding.InputName}' is missing.");
-        inputs[binding.InputName] = template.Replace(
-            binding.Token, value.ToString(), StringComparison.Ordinal);
+        inputs[binding.InputName] = Regex.Replace(
+            template, Regex.Escape(binding.Token) + "(?![A-Z0-9_])", _ => value.ToString(), RegexOptions.CultureInvariant);
     }
 
     private void ApplyDatePlaceholders(JsonObject workflow)

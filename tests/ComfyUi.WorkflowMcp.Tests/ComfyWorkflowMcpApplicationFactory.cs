@@ -23,7 +23,7 @@ public sealed class ComfyWorkflowMcpApplicationFactory : WebApplicationFactory<P
             """
             {
               "1": {
-                "inputs": { "prompt": "PARAM_PROMPT" },
+                "inputs": { "prompt": "PARAM_PROMPT", "aspect_ratio": "1:1", "cfg": 7.0 },
                 "class_type": "SaveImage"
               }
             }

@@ -55,7 +55,7 @@ public sealed partial class MediaAssetStore(IConfiguration configuration)
         CancellationToken cancellationToken)
     {
         var path = Find(filename)
-            ?? throw new ArgumentException("filename does not exist in the configured assets directory.", nameof(filename));
+            ?? throw new ToolFailureException("asset_not_found", "filename does not exist in the configured assets directory.", "Call asset_list and choose an existing filename.", nameof(filename));
         if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
             throw new ArgumentException("Image assets must be regular files, not symbolic links.", nameof(filename));
         var mimeType = ComfyClient.MimeFor(filename);

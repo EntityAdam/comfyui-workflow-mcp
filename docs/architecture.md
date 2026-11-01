@@ -7,7 +7,11 @@ state to ComfyUI.
 
 The workflow-facing tools are:
 
-- `setup()`
+- `setup()` (read-only status and guidance)
+- `workflow_configure()`
+- `workflow_parameterize()`
+- `workflow_unparameterize()`
+- `workflow_set_default()`
 - `workflow_list()`
 - `workflow_get()`
 - `workflow_get_options()`
@@ -25,6 +29,14 @@ Direct ComfyUI interaction is limited to:
 - `comfy_job_cancel()`
 - `comfy_queue_list()`
 - `comfy_queue_clear()`
+
+`workflow_list()` returns only workflow IDs, descriptions, and media types.
+`workflow_get_options()` returns detailed configuration and parameters on demand.
+Workflow mutations return compact change receipts; empty change lists are omitted.
+Workflow options include each parameter's node/input bindings. Parameterization
+uses a typed mapping schema with required fields and a four-value type enum.
+Tool failures share a structured code, message, and recovery step, with MCP's
+`isError` flag set. Argument-binding errors are normalized at the MCP boundary.
 
 Workflow execution helpers are internal APIs, not additional MCP tools.
 
@@ -62,15 +74,17 @@ Workflow JSON is the executable graph. YAML records defaults and parameter
 constraints learned from ComfyUI validation failures, allowing future calls to
 reject known-invalid values before submission.
 
-Setup may edit copied workflow JSON in place, add typed placeholders, write
-YAML, change workflow discovery paths, and persist default workflows for image,
-audio, and video generation.
+The focused workflow tools edit copied JSON in place, add typed placeholders,
+merge YAML settings, restore defaults as literals, and persist default workflows
+for image, audio, and video. `setup()` only inspects state and returns guidance.
 
 ## Input media
 
 `comfy_media_upload()` sends image, audio, and video references through
-ComfyUI's upload endpoint. Local paths must be in `assets`, created by
-`asset_stage`, beside the executable.
+ComfyUI's upload endpoint. Assets live in the configured root's `assets/`
+directory. Agents use `asset_list()` and filenames for existing files.
+`asset_stage()` accepts bytes supplied directly by a client; agents should
+never generate or reproduce base64 media.
 
 `asset_view(filename)` reads an image from the configured root's `assets`
 directory and returns a standard MCP `ImageContentBlock` with base64 bytes
