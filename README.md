@@ -108,7 +108,9 @@ output matching the requested media type.
 - `comfy_media_upload()` uploads an image, audio file, or video through
   ComfyUI's upload endpoint.
 - `asset_stage()` saves base64 client media in `assets/` for upload.
-- `asset_list()` lists media staged in `assets/`.
+- `asset_list()` lists recognized image, video, and audio files in `assets/`
+  by filename extension, omitting other files. Supported extensions are PNG,
+  JPG/JPEG, WebP, GIF, MP4, AVI, WebM, MOV, MP3, WAV, FLAC, and OGG.
 - `asset_exists()` validates a filename in `assets/`.
 - `asset_view(filename)` returns an image from `assets/` as MCP image content
   for clients that forward tool images to a vision-capable model.

@@ -4,6 +4,8 @@
 
 ### Changed
 
+- `asset_list()` now omits files without recognized image, video, or audio
+  extensions. AVI files are recognized as `video/x-msvideo`.
 - `setup()` now teaches clients how to parse ComfyUI API workflow JSON,
   discover common configurable inputs, and make additive
   `parameterize_workflow` calls without repeating existing bindings.

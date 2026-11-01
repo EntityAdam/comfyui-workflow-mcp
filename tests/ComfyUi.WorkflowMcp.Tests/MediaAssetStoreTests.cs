@@ -81,9 +81,28 @@ public sealed class MediaAssetStoreTests
         var asset = await store.StageAsync("AQI=", "asset.bin", "application/octet-stream", TestContext.Current.CancellationToken);
         var assets = store.ListAssets();
 
-        Assert.Single(assets);
+        Assert.Empty(assets);
         Assert.Equal(asset.Path, store.Find(asset.Filename));
         Assert.Null(store.Find("manual.png"));
         Assert.Throws<ArgumentException>(() => store.Find("../manual.png"));
+    }
+
+    [Fact]
+    public async Task ListAssetsIncludesOnlyRecognizedMediaExtensions()
+    {
+        using var temp = new TempDirectory();
+        var root = Path.Combine(temp.Path, "assets");
+        Directory.CreateDirectory(root);
+        string[] media = ["a.PNG", "b.jpg", "c.jpeg", "d.webp", "e.gif", "f.mp4", "g.AVI", "h.webm", "i.mov", "j.mp3", "k.WAV", "l.flac", "m.ogg"];
+        string[] other = ["notes.txt", "workflow.json", "settings.yaml", "asset.bin", "no-extension", "image.png.txt"];
+        foreach (var filename in media.Concat(other))
+            await File.WriteAllBytesAsync(Path.Combine(root, filename), [1, 2], TestContext.Current.CancellationToken);
+        var store = new MediaAssetStore(TestConfiguration.Create(("ComfyWorkflowMcp:Directory", temp.Path)));
+
+        var assets = store.ListAssets();
+
+        Assert.Equal(media, assets.Select(asset => asset.Filename));
+        Assert.Equal("video/x-msvideo", assets.Single(asset => asset.Filename == "g.AVI").MimeType);
+        Assert.All(assets, asset => Assert.Equal(2, asset.Bytes));
     }
 }

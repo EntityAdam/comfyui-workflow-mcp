@@ -115,6 +115,7 @@ public sealed class ComfyClient(HttpClient httpClient, IConfiguration configurat
         ".flac" => "audio/flac",
         ".ogg" => "audio/ogg",
         ".mp4" => "video/mp4",
+        ".avi" => "video/x-msvideo",
         ".webm" => "video/webm",
         ".mov" => "video/quicktime",
         _ => "application/octet-stream"
