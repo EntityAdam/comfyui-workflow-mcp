@@ -81,6 +81,7 @@ Each workflow may have
 `<ComfyWorkflowMcp__Directory>/workflows/<workflow-id>.yaml`, beside its JSON:
 
 ```yaml
+description: Generate detailed illustrations from a text prompt.
 media_type: image
 wait_for_completion: true
 defaults:
@@ -100,6 +101,17 @@ constraints:
 Values supplied in a generation call override YAML defaults. Values outside a
 known `allowed_values` list or configured constraint are rejected before
 submission to ComfyUI.
+
+`description` is optional workflow metadata. `workflow_list()` returns it in
+the workflow's `description` field, and `workflow_get_options()` includes it
+alongside the other YAML-backed options. Without a nonblank description, the
+catalog keeps its generated description (`Execute the '<workflow-id>' workflow.`).
+Use YAML's `description: |` syntax for multiple lines.
+
+You can edit the YAML directly or call
+`setup(operation: "configure_workflow", workflow_id: "portrait", description: "Generate portraits from text.")`.
+Omitting `description` during setup preserves its current value; an empty
+string removes it. Descriptions are metadata and are not workflow parameters.
 
 `wait_for_completion` controls the workflow's generation default. An explicit
 generation-tool argument overrides it; when neither is provided, the server

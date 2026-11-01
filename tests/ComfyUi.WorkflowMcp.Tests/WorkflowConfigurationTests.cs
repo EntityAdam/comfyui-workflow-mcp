@@ -5,6 +5,37 @@ namespace ComfyUi.WorkflowMcp.Tests;
 
 public sealed class WorkflowConfigurationTests
 {
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("Edit a reference image while preserving its composition.")]
+    [InlineData("Generate an image.\nUse for detailed illustrations.\n")]
+    public void WorkflowDescriptionsAreOptionalAndSurviveOtherConfigurationChanges(string? description)
+    {
+        using var temp = new TempDirectory();
+        var root = Path.Combine(temp.Path, "workflows");
+        Directory.CreateDirectory(root);
+        File.WriteAllText(Path.Combine(root, "image.json"),
+            """{"1":{"class_type":"Text","inputs":{"text":"PARAM_PROMPT"}}}""");
+        var config = TestConfiguration.Create(("ComfyWorkflowMcp:Directory", temp.Path));
+        var configuration = new WorkflowConfigurationManager(config);
+        var workflows = new WorkflowManager(config, configuration);
+        Assert.Null(configuration.Load("image").Description);
+        Assert.Equal("Execute the 'image' workflow.", Assert.Single(workflows.Catalog()).Description);
+
+        configuration.SaveWorkflow("image", "image", null, null, null, null, description);
+        configuration.SaveWorkflow("image", null, false, null, null, null);
+
+        var expected = string.IsNullOrWhiteSpace(description) ? null : description;
+        Assert.Equal(expected, configuration.Load("image").Description);
+        Assert.Equal(expected ?? "Execute the 'image' workflow.", Assert.Single(workflows.Catalog()).Description);
+
+        configuration.SaveWorkflow("image", null, null, null, null, null, "");
+        Assert.Null(configuration.Load("image").Description);
+        Assert.Equal("Execute the 'image' workflow.", Assert.Single(workflows.Catalog()).Description);
+    }
+
     [Fact]
     public void WorkflowYamlDefaultsAndConstraintsPreventInvalidRuns()
     {
@@ -28,7 +59,7 @@ public sealed class WorkflowConfigurationTests
                 maximum: 20
             """);
         var config = TestConfiguration.Create(("ComfyWorkflowMcp:Directory", temp.Path));
-        var manager = new WorkflowManager(config);
+        var manager = new WorkflowManager(config, new WorkflowConfigurationManager(config));
         var options = new GenerationOptionsService(manager, new WorkflowConfigurationManager(config));
 
         Assert.False(new WorkflowConfigurationManager(config).Load("image").WaitForCompletion);
@@ -50,7 +81,7 @@ public sealed class WorkflowConfigurationTests
         File.WriteAllText(Path.Combine(workflowDirectory, "copied.json"),
             """{"7":{"class_type":"KSampler","inputs":{"steps":20}}}""");
         var config = TestConfiguration.Create(("ComfyWorkflowMcp:Directory", temp.Path));
-        var workflows = new WorkflowManager(config);
+        var workflows = new WorkflowManager(config, new WorkflowConfigurationManager(config));
         var manager = new WorkflowConfigurationManager(config);
 
         manager.ParameterizeWorkflow("copied", new JsonObject
@@ -70,7 +101,7 @@ public sealed class WorkflowConfigurationTests
         File.WriteAllText(Path.Combine(workflowDirectory, "copied.json"),
             """{"6":{"class_type":"Text","inputs":{"text":""}},"7":{"class_type":"KSampler","inputs":{"steps":20}}}""");
         var config = TestConfiguration.Create(("ComfyWorkflowMcp:Directory", temp.Path));
-        var workflows = new WorkflowManager(config);
+        var workflows = new WorkflowManager(config, new WorkflowConfigurationManager(config));
         var manager = new WorkflowConfigurationManager(config);
 
         manager.ParameterizeWorkflow("copied", new JsonObject

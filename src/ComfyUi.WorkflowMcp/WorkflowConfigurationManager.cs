@@ -26,7 +26,8 @@ public sealed partial class WorkflowConfigurationManager(IConfiguration configur
             root["wait_for_completion"]?.GetValue<bool?>(),
             defaults,
             allowed,
-            constraints);
+            constraints,
+            string.IsNullOrWhiteSpace(root["description"]?.ToString()) ? null : root["description"]!.ToString());
     }
 
     public string? DefaultWorkflow(string mediaType) =>
@@ -91,10 +92,16 @@ public sealed partial class WorkflowConfigurationManager(IConfiguration configur
         bool? waitForCompletion,
         JsonObject? defaults,
         JsonObject? allowedValues,
-        JsonObject? constraints)
+        JsonObject? constraints,
+        string? description = null)
     {
         var path = WorkflowConfigPath(workflowId);
         var document = LoadDocument(path);
+        if (description is not null)
+        {
+            if (string.IsNullOrWhiteSpace(description)) document.Remove("description");
+            else document["description"] = description;
+        }
         document.Remove("family");
         document.Remove("model");
         if (!string.IsNullOrWhiteSpace(mediaType))

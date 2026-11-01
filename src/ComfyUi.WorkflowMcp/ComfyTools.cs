@@ -25,7 +25,8 @@ public sealed class ComfyTools(
         [Description("For parameterize_workflow: additive mappings keyed by desired public parameter name. Existing PARAM_* bindings remain unchanged; supply only new or targeted bindings. Each value requires node_id (exact top-level JSON key, including colons), input_name (exact key under that node's inputs), and type: string, integer, number, or boolean. Example: {\"steps\":{\"node_id\":\"3\",\"input_name\":\"steps\",\"type\":\"integer\"}}.")] JsonObject? parameters = null,
         JsonObject? defaults = null,
         JsonObject? allowed_values = null,
-        [Description("Per-parameter validation including minimum, maximum, and pattern.")] JsonObject? constraints = null)
+        [Description("Per-parameter validation including minimum, maximum, and pattern.")] JsonObject? constraints = null,
+        [Description("For configure_workflow: optional workflow description. Omit to preserve it; pass an empty string to remove it.")] string? description = null)
     {
         try
         {
@@ -35,7 +36,7 @@ public sealed class ComfyTools(
                 "configure_workflow" => new
                 {
                     success = true,
-                    path = ConfigureWorkflow(Required(workflow_id, nameof(workflow_id)), media_type, wait_for_completion, defaults, allowed_values, constraints)
+                    path = ConfigureWorkflow(Required(workflow_id, nameof(workflow_id)), media_type, wait_for_completion, defaults, allowed_values, constraints, description)
                 },
                 "parameterize_workflow" => new
                 {
@@ -53,7 +54,7 @@ public sealed class ComfyTools(
         catch (Exception ex) { return new { success = false, error = ex.Message }; }
     }
 
-    [McpServerTool(Name = "workflow_list"), Description("List saved ComfyUI workflows, media types, placeholders, defaults, and validation constraints.")]
+    [McpServerTool(Name = "workflow_list"), Description("List saved ComfyUI workflows, descriptions, media types, placeholders, defaults, and validation constraints.")]
     public object WorkflowList()
     {
         var catalog = workflows.Catalog()
@@ -384,7 +385,7 @@ public sealed class ComfyTools(
     private static string Required(string? value, string name) =>
         !string.IsNullOrWhiteSpace(value) ? value : throw new ArgumentException($"{name} is required.");
 
-    private string ConfigureWorkflow(string workflowId, string? mediaType, bool? waitForCompletion, JsonObject? defaults, JsonObject? allowedValues, JsonObject? constraints)
+    private string ConfigureWorkflow(string workflowId, string? mediaType, bool? waitForCompletion, JsonObject? defaults, JsonObject? allowedValues, JsonObject? constraints, string? description)
     {
         var workflow = workflows.Load(workflowId)
             ?? throw new ArgumentException($"Workflow '{workflowId}' not found.");
@@ -395,6 +396,6 @@ public sealed class ComfyTools(
                      .Distinct(StringComparer.Ordinal))
             if (!parameters.ContainsKey(configured))
                 throw new ArgumentException($"Workflow '{workflowId}' has no parameter '{configured}'.");
-        return workflowConfiguration.SaveWorkflow(workflowId, mediaType, waitForCompletion, defaults, allowedValues, constraints);
+        return workflowConfiguration.SaveWorkflow(workflowId, mediaType, waitForCompletion, defaults, allowedValues, constraints, description);
     }
 }

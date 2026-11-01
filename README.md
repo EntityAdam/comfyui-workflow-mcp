@@ -79,7 +79,8 @@ exported from ComfyUI and do not require version-preserving transformations.
 - `generate_image()` runs an image workflow.
 - `generate_audio()` runs an audio workflow.
 - `generate_video()` runs a video workflow.
-- `workflow_list()` lists discovered workflow IDs and their parameters.
+- `workflow_list()` lists discovered workflow IDs, descriptions from workflow
+  YAML when configured, and their parameters.
 - `workflow_get(workflow_id)` returns one API-format workflow JSON for node and
   input inspection; `workflow_id` is mandatory.
 - `workflow_get_options(workflow_id)` returns YAML-backed defaults, allowed
