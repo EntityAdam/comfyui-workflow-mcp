@@ -11,8 +11,9 @@ The agent should:
    choose a workflow ID.
 2. Call `generate_image()` with the prompt and any required workflow
    parameters.
-3. Let the default completion mode wait and return the first image output to
-   the client.
+3. Check the held run count with `batch_count()`.
+4. When the user explicitly asks to play the batch, call `batch_play()` to run it
+   and return the first image output.
 
 If there is no default and no `workflow_id` is provided, `generate_image()`
 recommends `workflow_set_default()`. The workflow tools can parameterize a copied ComfyUI workflow,

@@ -82,6 +82,13 @@ include workflow JSON, YAML configuration, or input media. Put workflow JSON
 under the root's `workflows` subdirectory and call `setup()` for configuration
 guidance. Use the focused workflow tools to apply changes.
 
+Generation holds runs locally by default. `batch_count()` returns only the
+number awaiting Play, and `batch_play()` starts them when the user explicitly
+asks. See [held batches](batch-queue.md) for completion settings and recovery.
+Use a persistent `ComfyWorkflowMcp__Directory` outside the tool installation to
+keep the same queue and workflows across package upgrades. Stdio mode does not
+open an HTTP listener; `ComfyWorkflowMcp__ServerUrl` applies only to HTTP mode.
+
 ## ComfyUI at another URL
 
 Set `ComfyWorkflowMcp__BaseUrl` when ComfyUI listens on another port, hostname,

@@ -28,8 +28,9 @@ public sealed class McpServerIntegrationTests(ComfyWorkflowMcpApplicationFactory
         var names = response["result"]!["tools"]!.AsArray().Select(tool => tool!["name"]!.ToString()).ToArray();
         string[] expected =
         [
-            "setup", "workflow_configure", "workflow_parameterize", "workflow_unparameterize", "workflow_set_default", "workflow_list", "workflow_get", "workflow_get_options", "generate_image", "generate_audio", "generate_video",
-            "comfy_media_upload", "asset_stage", "asset_list", "asset_exists", "asset_view", "comfy_job_cancel", "comfy_queue_list", "comfy_queue_clear", "comfy_diffusion_model_list"
+            "setup", "workflow_configure", "workflow_parameterize", "workflow_unparameterize", "workflow_set_default", "workflow_list", "workflow_get", "workflow_get_options", "workflow_preview", "generate_image", "generate_audio", "generate_video",
+            "comfy_media_upload", "asset_stage", "asset_list", "asset_exists", "asset_view", "comfy_job_cancel", "comfy_queue_list", "comfy_queue_clear", "comfy_diffusion_model_list",
+            "batch_count", "batch_remove", "batch_clear", "batch_play"
         ];
         Assert.Equal(expected.Order(StringComparer.Ordinal), names);
     }
@@ -51,6 +52,7 @@ public sealed class McpServerIntegrationTests(ComfyWorkflowMcpApplicationFactory
             Assert.DoesNotContain("wait_for_completion",
                 tool["inputSchema"]!["required"]?.AsArray()
                     .Select(value => value!.ToString()) ?? []);
+            Assert.True(tool["inputSchema"]!["properties"]!["enqueue"]!["default"]!.GetValue<bool>());
         }
     }
 
@@ -506,7 +508,13 @@ public sealed class McpServerIntegrationTests(ComfyWorkflowMcpApplicationFactory
         var generation = await SendToolAsync(toolClient, "generate_image", new JsonObject { ["workflow_id"] = "test_image", ["prompt"] = "hello" });
         AssertToolFailure(generation, "missing_default");
 
-        await CallStructuredAsync(toolClient, "workflow_configure", JsonNode.Parse("""{"workflow_id":"test_image","defaults":{"cfg":"bad"}}""")!.AsObject());
+        var invalidConfiguration = await SendToolAsync(toolClient, "workflow_configure", JsonNode.Parse("""{"workflow_id":"test_image","defaults":{"cfg":"bad"}}""")!.AsObject());
+        AssertToolFailure(invalidConfiguration, "invalid_default");
+        var configuration = toolFactory.Services.GetRequiredService<WorkflowConfigurationManager>();
+        Assert.False(configuration.Load("test_image").Defaults.ContainsKey("cfg"));
+        // Removal also protects against malformed defaults edited directly on disk.
+        File.WriteAllText(Path.Combine(configuration.RootDirectory, "workflows", "test_image.yaml"),
+            "defaults:\n  cfg: bad\n");
         var invalid = await SendToolAsync(toolClient, "workflow_unparameterize", arguments);
         AssertToolFailure(invalid, "invalid_default");
         Assert.Equal("cfg", StructuredContent(invalid)["parameter"]!.ToString());
@@ -544,7 +552,7 @@ public sealed class McpServerIntegrationTests(ComfyWorkflowMcpApplicationFactory
         foreach (var name in new[] { "generate_image", "generate_audio", "generate_video" })
         {
             var tool = tools.Single(item => item!["name"]!.ToString() == name)!;
-            Assert.Contains("wait_for_completion=false returns a prompt ID without media", tool["description"]!.ToString());
+            Assert.Contains("wait_for_completion=false returns a prompt ID", tool["description"]!.ToString());
             Assert.Contains("True waits for media; false returns a prompt ID", tool["inputSchema"]!["properties"]!["wait_for_completion"]!["description"]!.ToString());
         }
     }
@@ -576,6 +584,180 @@ public sealed class McpServerIntegrationTests(ComfyWorkflowMcpApplicationFactory
     }
 
     private Task<JsonObject> SendMcpAsync(string json) => SendMcpAsync(_client, json);
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task PreviewAndBothCompletionModesUsePreparedGraph(bool wait)
+    {
+        await using var comfy = new FakeComfyUiServer();
+        WorkflowPreparationTests.AddDefinitions(comfy);
+        await comfy.StartAsync(TestContext.Current.CancellationToken);
+        using var application = new ComfyWorkflowMcpApplicationFactory(comfy.BaseUrl);
+        using var client = application.CreateClient();
+        var configuration = application.Services.GetRequiredService<WorkflowConfigurationManager>();
+        var directory = Path.Combine(configuration.RootDirectory, "workflows");
+        var graph = JsonNode.Parse(WorkflowPreparationTests.ReferenceGraph)!.AsObject();
+        graph["seed"] = JsonNode.Parse("""{"class_type":"Seed (rgthree)","inputs":{"seed":-1}}""");
+        var original = graph.ToJsonString();
+        File.WriteAllText(Path.Combine(directory, "references.json"), original);
+        var transforms = JsonNode.Parse("""
+            [{"id":"seed","kind":"replace_negative_rgthree_seed"},
+             {"id":"refs","kind":"minimax_references","node_id":"136"}]
+            """)!.AsArray();
+        var receipt = await CallStructuredAsync(client, "workflow_configure", new JsonObject
+        {
+            ["workflow_id"] = "references",
+            ["media_type"] = "image",
+            ["transforms"] = transforms,
+            ["defaults"] = new JsonObject { ["reference_audios"] = new JsonArray("voice.wav") }
+        });
+        Assert.True(receipt["success"]!.GetValue<bool>(), receipt.ToJsonString());
+        Assert.True(receipt["transforms_updated"]!.GetValue<bool>());
+        var options = await CallStructuredAsync(client, "workflow_get_options", new JsonObject { ["workflow_id"] = "references" });
+        Assert.Equal("array", options["parameters"]!["reference_images"]!["type"]!.ToString());
+        Assert.Equal(2, options["transforms"]!.AsArray().Count);
+
+        var preview = await CallStructuredAsync(client, "workflow_preview", new JsonObject
+        {
+            ["workflow_id"] = "references",
+            ["options"] = new JsonObject { ["prompt"] = "hello", ["reference_images"] = new JsonArray("character.png") }
+        });
+        Assert.Null(comfy.LastPromptBody);
+        Assert.Equal("SeedNode", preview["workflow"]!["seed"]!["class_type"]!.ToString());
+
+        var response = await SendToolAsync(client, "generate_image", new JsonObject
+        {
+            ["workflow_id"] = "references",
+            ["prompt"] = "hello",
+            ["enqueue"] = false,
+            ["wait_for_completion"] = wait,
+            ["options"] = new JsonObject { ["reference_images"] = new JsonArray("character.png") }
+        });
+        Assert.False(response["result"]!["isError"]?.GetValue<bool>() ?? false, response.ToJsonString());
+        var submitted = comfy.LastPromptBody!["prompt"]!;
+        Assert.True(JsonNode.DeepEquals(preview["workflow"], submitted));
+        Assert.Equal("character.png", submitted["mcp:refs:image:0"]!["inputs"]!["image"]!.ToString());
+        Assert.Equal("voice.wav", submitted["mcp:refs:audio:0"]!["inputs"]!["audio"]!.ToString());
+        Assert.NotEmpty(StructuredContent(response)["transforms_applied"]!.AsArray());
+        Assert.Equal(wait, comfy.LastWebSocketClientId is not null);
+        Assert.Equal(original, File.ReadAllText(Path.Combine(directory, "references.json")));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task BothCompletionModesReturnStructuredComfyRejectionWithoutRetrying(bool wait)
+    {
+        await using var comfy = new FakeComfyUiServer
+        {
+            SubmissionError = JsonNode.Parse(ComfyClientTests.Rejection)!.AsObject(),
+            SubmissionStatusCode = 400
+        };
+        await comfy.StartAsync(TestContext.Current.CancellationToken);
+        using var application = new ComfyWorkflowMcpApplicationFactory(comfy.BaseUrl);
+        using var client = application.CreateClient();
+        var response = await SendToolAsync(client, "generate_image", new JsonObject
+        {
+            ["workflow_id"] = "test_image",
+            ["prompt"] = "hello",
+            ["enqueue"] = false,
+            ["wait_for_completion"] = wait
+        });
+        AssertToolFailure(response, "workflow_rejected");
+        var error = StructuredContent(response);
+        Assert.Equal("steps", error["validation_errors"]![0]!["input_name"]!.ToString());
+        Assert.Equal("sampler:7", error["validation_errors"]![0]!["node_id"]!.ToString());
+        var text = JsonNode.Parse(response["result"]!["content"]![0]!["text"]!.ToString());
+        Assert.True(JsonNode.DeepEquals(error, text));
+        Assert.Equal(1, comfy.SubmissionCount);
+    }
+
+    [Fact]
+    public async Task ConfigurationValidatesMergedStateAndAllowsAtomicTransformRemoval()
+    {
+        using var application = new ComfyWorkflowMcpApplicationFactory();
+        using var client = application.CreateClient();
+        var configuration = application.Services.GetRequiredService<WorkflowConfigurationManager>();
+        var directory = Path.Combine(configuration.RootDirectory, "workflows");
+        File.WriteAllText(Path.Combine(directory, "references.json"), WorkflowPreparationTests.ReferenceGraph);
+        var configured = await CallStructuredAsync(client, "workflow_configure", JsonNode.Parse("""
+            {"workflow_id":"references","defaults":{"prompt":"hello","reference_images":["a.png"]},
+             "transforms":[{"id":"refs","kind":"minimax_references","node_id":"136"}]}
+            """)!.AsObject());
+        Assert.True(configured["success"]!.GetValue<bool>());
+        var path = Path.Combine(directory, "references.yaml");
+        var before = File.ReadAllText(path);
+        var invalid = await SendToolAsync(client, "workflow_configure", JsonNode.Parse("""{"workflow_id":"references","transforms":[]}""")!.AsObject());
+        AssertToolFailure(invalid, "unknown_parameter");
+        Assert.Equal(before, File.ReadAllText(path));
+        var removed = await CallStructuredAsync(client, "workflow_configure", JsonNode.Parse("""
+            {"workflow_id":"references","transforms":[],"defaults":{"reference_images":null}}
+            """)!.AsObject());
+        Assert.True(removed["success"]!.GetValue<bool>());
+        Assert.True(removed["transforms_updated"]!.GetValue<bool>());
+        Assert.Equal("reference_images", Assert.Single(removed["defaults_removed"]!.AsArray())!.ToString());
+    }
+
+    [Fact]
+    public async Task AllGenerationTypesAccumulateWithoutSubmissionUntilUserPlays()
+    {
+        await using var comfy = new FakeComfyUiServer();
+        await comfy.StartAsync(TestContext.Current.CancellationToken);
+        using var application = new ComfyWorkflowMcpApplicationFactory(comfy.BaseUrl);
+        using var client = application.CreateClient();
+        var configuration = application.Services.GetRequiredService<WorkflowConfigurationManager>();
+        var directory = Path.Combine(configuration.RootDirectory, "workflows");
+        File.WriteAllText(Path.Combine(directory, "audio.json"), """{"1":{"class_type":"Audio","inputs":{"tags":"PARAM_TAGS","lyrics":"PARAM_LYRICS"}}}""");
+        File.WriteAllText(Path.Combine(directory, "audio.yaml"), "media_type: audio\n");
+        File.WriteAllText(Path.Combine(directory, "video.json"), """{"1":{"class_type":"Video","inputs":{"prompt":"PARAM_PROMPT"}}}""");
+        File.WriteAllText(Path.Combine(directory, "video.yaml"), "media_type: video\n");
+        var image = await CallStructuredAsync(client, "generate_image", new JsonObject { ["workflow_id"] = "test_image", ["prompt"] = "hello" });
+        var audio = await CallStructuredAsync(client, "generate_audio", new JsonObject { ["workflow_id"] = "audio", ["tags"] = "ambient", ["lyrics"] = "" });
+        var video = await CallStructuredAsync(client, "generate_video", new JsonObject { ["workflow_id"] = "video", ["prompt"] = "scene" });
+        foreach (var receipt in new[] { image, audio, video })
+        {
+            Assert.True(receipt["queued"]!.GetValue<bool>(), receipt.ToJsonString());
+            Assert.False(receipt["submitted"]!.GetValue<bool>());
+        }
+        Assert.Equal(0, comfy.SubmissionCount);
+        var held = await CallStructuredAsync(client, "batch_count", []);
+        Assert.Equal(3, held["count"]!.GetValue<int>());
+        Assert.Single(held);
+        var played = await CallStructuredAsync(client, "batch_play", new JsonObject { ["wait_for_completion"] = false });
+        Assert.True(played["success"]!.GetValue<bool>(), played.ToJsonString());
+        Assert.Equal(3, played["processed_count"]!.GetValue<int>());
+        Assert.Equal(3, comfy.SubmissionCount);
+        Assert.Equal(["image", "audio", "video"], played["runs"]!.AsArray().Select(item => item!["media_type"]!.ToString()));
+        var again = await CallStructuredAsync(client, "batch_play", []);
+        Assert.Equal(0, again["selected_count"]!.GetValue<int>());
+        Assert.Equal(3, comfy.SubmissionCount);
+    }
+
+    [Fact]
+    public async Task BatchToolsReturnMediaAndRemoveOnlyHeldEntries()
+    {
+        await using var comfy = new FakeComfyUiServer();
+        await comfy.StartAsync(TestContext.Current.CancellationToken);
+        using var application = new ComfyWorkflowMcpApplicationFactory(comfy.BaseUrl);
+        using var client = application.CreateClient();
+        var first = await CallStructuredAsync(client, "generate_image", new JsonObject { ["workflow_id"] = "test_image", ["prompt"] = "hello" });
+        var second = await CallStructuredAsync(client, "generate_image", new JsonObject { ["workflow_id"] = "test_image", ["prompt"] = "goodbye" });
+        var removed = await CallStructuredAsync(client, "batch_remove", new JsonObject { ["entry_id"] = second["entry_id"]!.ToString() });
+        Assert.True(removed["removed"]!.GetValue<bool>());
+        var play = await SendToolAsync(client, "batch_play", []);
+        Assert.False(play["result"]!["isError"]?.GetValue<bool>() ?? false, play.ToJsonString());
+        Assert.Contains(play["result"]!["content"]!.AsArray(), item => item!["type"]!.ToString() == "image");
+        var completed = Assert.Single(StructuredContent(play)["runs"]!.AsArray())!;
+        Assert.Equal(first["entry_id"]!.ToString(), completed["entry_id"]!.ToString());
+        Assert.Equal("completed", completed["status"]!.ToString());
+        Assert.True(File.Exists(completed["saved_path"]!.ToString()));
+        await CallStructuredAsync(client, "generate_image", new JsonObject { ["workflow_id"] = "test_image", ["prompt"] = "hello" });
+        var cleared = await CallStructuredAsync(client, "batch_clear", []);
+        Assert.Equal(1, cleared["removed_count"]!.GetValue<int>());
+        Assert.Equal(0, (await CallStructuredAsync(client, "batch_count", []))["count"]!.GetValue<int>());
+        Assert.Equal(1, comfy.SubmissionCount);
+    }
 
     private static void AssertToolFailure(JsonObject response, string code)
     {

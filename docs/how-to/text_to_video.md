@@ -12,9 +12,11 @@ The agent should:
    choose a workflow ID.
 2. Call `generate_video()` with the prompt and the workflow's required
    parameters.
-3. Let the default completion mode wait and return the first video output to
-   the client.
+3. Check the held run count with `batch_count()`.
+4. When the user explicitly asks to play the batch, call `batch_play()` to run it
+   and return the first video output.
 
-Video generation can be long-running. Set `wait_for_completion` to `false` to
-submit without waiting, then use `comfy_queue_list()` to inspect the ComfyUI
-queue.
+Video generation can be long-running. When the user asks to play, use
+`batch_play(wait_for_completion: false)` to submit without waiting. Then use
+`comfy_queue_list()` to inspect the submitted jobs. Adding a run never starts it
+automatically.

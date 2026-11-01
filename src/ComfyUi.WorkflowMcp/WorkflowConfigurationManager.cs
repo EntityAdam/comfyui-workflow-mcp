@@ -14,6 +14,17 @@ public sealed partial class WorkflowConfigurationManager(IConfiguration configur
     {
         var path = WorkflowConfigPath(workflowId);
         var root = LoadDocument(path);
+        return ReadConfiguration(workflowId, root);
+    }
+
+    private static WorkflowValidation ReadConfiguration(string workflowId, JsonObject root)
+    {
+        foreach (var section in new[] { "defaults", "allowed_values", "constraints" })
+            if (root[section] is not null and not JsonObject)
+                throw InvalidConfiguration(null, $"{section} must be an object keyed by parameter name.");
+        if (root["wait_for_completion"] is { } completion && (completion is not JsonValue flag || !flag.TryGetValue<bool>(out _)))
+            throw InvalidConfiguration(null, "wait_for_completion must be a boolean.");
+        if (root["media_type"] is { } mediaType) NormalizeMediaType(mediaType.ToString());
         var defaults = Object(root["defaults"]);
         // Accept preview5 files while configuration updates migrate their schema.
         if (root["model"] is { } legacyModel && defaults["model"] is null)
@@ -27,7 +38,10 @@ public sealed partial class WorkflowConfigurationManager(IConfiguration configur
             defaults,
             allowed,
             constraints,
-            string.IsNullOrWhiteSpace(root["description"]?.ToString()) ? null : root["description"]!.ToString());
+            string.IsNullOrWhiteSpace(root["description"]?.ToString()) ? null : root["description"]!.ToString())
+        {
+            Transforms = ReadTransforms(root)
+        };
     }
 
     public string? DefaultWorkflow(string mediaType) =>
@@ -42,7 +56,9 @@ public sealed partial class WorkflowConfigurationManager(IConfiguration configur
             directory = RootDirectory,
             default_workflows = defaults,
             workflow_count = workflows.Catalog().Count,
+            batch_guide = "Generation queues held runs by default, persisting workflow/options snapshots under batch/queue.json without submitting to ComfyUI. Use batch_count to see how many runs await Play, and batch_remove or batch_clear to edit. Entry IDs come from generation or playback receipts. Call batch_play ONLY when the user explicitly asks to play/start the batch; never play automatically. New additions during playback remain held. enqueue=false is available only for explicitly requested immediate generation. ComfyUI queue tools manage already-submitted jobs, not the held batch.",
             asset_guide = "For existing media, call asset_list and pass its filename to asset_view or comfy_media_upload. asset_stage is only for bytes supplied directly by the client; never generate or reproduce base64.",
+            transform_guide = "workflow_configure accepts an ordered transforms array, replacing the full list ([] clears it). Each entry has a unique id and kind, plus optional enabled. replace_negative_rgthree_seed swaps Seed (rgthree) nodes with seed -1 for installed SeedNode nodes. minimax_references requires node_id targeting MiniMaxH3ReferenceToVideo and exposes ordered reference_images/reference_audios filename lists and reference_videos objects with file and optional include_audio (default false). Upload assets first and use workflow_value. workflow_get_options exposes their schemas; workflow_preview prepares the graph without submission. Generation applies transforms to an in-memory copy in both completion modes.",
             parameterization_guide = new
             {
                 json_shape = "The root object is keyed by node ID. Each node normally contains class_type, inputs, and optional _meta. Inspect node.inputs for literal values to expose. An array such as [\"105:104\", 0] links another node's output and should not be parameterized as a literal.",
@@ -93,10 +109,16 @@ public sealed partial class WorkflowConfigurationManager(IConfiguration configur
         JsonObject? defaults,
         JsonObject? allowedValues,
         JsonObject? constraints,
-        string? description = null)
+        string? description = null,
+        JsonArray? transforms = null)
     {
         var path = WorkflowConfigPath(workflowId);
         var document = LoadDocument(path);
+        if (transforms is not null)
+        {
+            WorkflowTransforms.Parse(transforms);
+            document["transforms"] = transforms.DeepClone();
+        }
         // Preserve legacy model defaults when applying incremental updates.
         if (document["model"] is { } legacyModel)
         {
@@ -118,6 +140,9 @@ public sealed partial class WorkflowConfigurationManager(IConfiguration configur
         MergeSection(document, "defaults", defaults);
         MergeSection(document, "allowed_values", allowedValues);
         MergeSection(document, "constraints", constraints, recursive: true);
+        var workflow = WorkflowManager.LoadFromDirectory(configuration.WorkflowDirectory(), workflowId)
+            ?? throw ToolFailureException.WorkflowNotFound(workflowId);
+        ValidateConfiguration(workflow, ReadConfiguration(workflowId, document));
         SaveDocument(path, document);
         return path;
     }
@@ -243,6 +268,15 @@ public sealed partial class WorkflowConfigurationManager(IConfiguration configur
     private string WorkflowConfigPath(string workflowId) =>
         Path.Combine(RootDirectory, "workflows", SafeName(workflowId) + ".yaml");
 
+    private static JsonArray ReadTransforms(JsonObject document)
+    {
+        if (document["transforms"] is null) return [];
+        if (document["transforms"] is not JsonArray transforms)
+            throw WorkflowTransforms.Invalid("transforms must be an ordered array.");
+        WorkflowTransforms.Parse(transforms);
+        return transforms.DeepClone().AsArray();
+    }
+
     private static string Placeholder(string name, string type)
     {
         var prefix = Normalize(type) switch
@@ -286,7 +320,7 @@ public sealed partial class WorkflowConfigurationManager(IConfiguration configur
     {
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         var plain = ToPlainObject(document);
-        File.WriteAllText(path, new SerializerBuilder().Build().Serialize(plain));
+        File.WriteAllText(path, new SerializerBuilder().WithQuotingNecessaryStrings().Build().Serialize(plain));
     }
 
     private static JsonObject Object(JsonNode? node) =>
@@ -301,12 +335,12 @@ public sealed partial class WorkflowConfigurationManager(IConfiguration configur
         bool boolean => JsonValue.Create(boolean),
         int integer => JsonValue.Create(integer),
         long integer => JsonValue.Create(integer),
+        byte or sbyte or short or ushort or uint => JsonValue.Create(Convert.ToInt64(value, CultureInfo.InvariantCulture)),
+        ulong integer => integer <= long.MaxValue ? JsonValue.Create((long)integer) : JsonValue.Create(integer),
         double number => JsonValue.Create(number),
         float number => JsonValue.Create(number),
         decimal number => JsonValue.Create(number),
-        string text when bool.TryParse(text, out var boolean) => JsonValue.Create(boolean),
-        string text when long.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var integer) => JsonValue.Create(integer),
-        string text when double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var number) => JsonValue.Create(number),
+        // The deserializer already types unquoted scalars. Quoted node IDs and filenames stay strings.
         _ => JsonValue.Create(value.ToString())
     };
 
@@ -316,7 +350,9 @@ public sealed partial class WorkflowConfigurationManager(IConfiguration configur
         JsonObject obj => obj.ToDictionary(pair => pair.Key, pair => ToPlainObject(pair.Value)),
         JsonArray array => array.Select(ToPlainObject).ToList(),
         JsonValue value when value.TryGetValue<bool>(out var boolean) => boolean,
+        JsonValue value when value.TryGetValue<int>(out var integer) => integer,
         JsonValue value when value.TryGetValue<long>(out var integer) => integer,
+        JsonValue value when value.TryGetValue<ulong>(out var integer) => integer,
         JsonValue value when value.TryGetValue<double>(out var number) => number,
         JsonValue value => value.ToString(),
         _ => node.ToString()

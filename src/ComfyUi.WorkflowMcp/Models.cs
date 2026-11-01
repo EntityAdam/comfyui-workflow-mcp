@@ -43,6 +43,11 @@ public sealed record ComfyInputUpload(string Name, string Subfolder, string Type
         ? Name
         : $"{Subfolder.TrimEnd('/', '\\').Replace('\\', '/')}/{Name}";
 }
-public sealed record WorkflowValidation(string WorkflowId, string? MediaType, bool? WaitForCompletion, JsonObject Defaults, JsonObject AllowedValues, JsonObject Constraints, string? Description = null);
+public sealed record WorkflowValidation(string WorkflowId, string? MediaType, bool? WaitForCompletion, JsonObject Defaults, JsonObject AllowedValues, JsonObject Constraints, string? Description = null)
+{
+    public JsonArray Transforms { get; init; } = [];
+}
+public sealed record PreparedWorkflow(string WorkflowId, string? MediaType, JsonObject Workflow, JsonArray Changes);
+public sealed record WorkflowPlan(string WorkflowId, string? MediaType, bool WaitForCompletion, JsonObject Workflow, JsonObject Values, JsonArray Transforms);
 public sealed record ResolvedWorkflowExecution(string WorkflowId, string? MediaType, JsonObject Values);
 public sealed record CompletedWorkflow(string PromptId, ComfyOutputAsset Output, byte[] Bytes, string MimeType);

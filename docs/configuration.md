@@ -9,10 +9,11 @@ variables replace `:` with `__`:
 - `ComfyWorkflowMcp__ServerUrl` — public MCP server URL; default
   `http://localhost:9001`
 - `ComfyWorkflowMcp__Directory` — root for `settings.yaml`, workflows, workflow
-YAML, staged assets, and generated output; default is the directory containing the executable
+YAML, the held batch queue, staged assets, and generated output; default is the directory containing the executable
 
-These directories are not bundled. The server can start while ComfyUI is
-offline, but uploads, queue operations, and generation require ComfyUI.
+These directories are not bundled. The server can start and hold generation
+runs while ComfyUI is offline. Uploads, playback, immediate generation, and
+ComfyUI queue operations require ComfyUI. See [held batches](batch-queue.md).
 
 ## Media assets
 
@@ -51,6 +52,11 @@ Run `workflow_list()` after adding a workflow. Each entry contains only
 `workflow_id`, `description`, and `media_type`. Call `workflow_get_options()`
 for parameters and configuration, or `workflow_get()` for workflow JSON.
 The package intentionally ships without example workflows.
+
+Workflows can also declare ordered execution-time transforms for seed-node
+compatibility and MiniMax reference-media lists. See
+[workflow transforms](workflow-transforms.md) for configuration, media options,
+and `workflow_preview` examples.
 
 `workflow_get_options(workflow_id)` includes a `bindings` list for each
 parameter, with the exact `node_id` and `input_name` of every bound input.
@@ -113,6 +119,26 @@ Values supplied in a generation call override YAML defaults. Values outside a
 known `allowed_values` list or configured constraint are rejected before
 submission to ComfyUI.
 
+`workflow_configure` validates the complete merged configuration before writing
+YAML. Defaults must be convertible to the parameter's scalar type (or match a
+reference-list schema), contain no `PARAM_*` placeholders, and satisfy the final
+allowed values and constraints. Constraint rules must have valid types, numeric
+bounds must be consistent, and regular expressions must compile. Invalid updates
+leave both workflow JSON and YAML unchanged. Defaults and rules can be changed
+together in one call.
+
+The `required` field returned by `workflow_get_options` means the caller must
+supply a value. A scalar with a default, or an integer `seed` with automatic
+generation, is not required from the caller. Setting `constraints.required: false`
+on another scalar requires a default; the server rejects that setting otherwise.
+Scalar placeholders cannot be silently omitted from an executable workflow.
+Reference lists default to empty arrays unless explicitly required and no default
+is configured. Defaults satisfy `required: true` too.
+Automatic seeds honor configured bounds and allowed values. Configuration is
+rejected if an automatic fallback cannot produce an allowed nonnegative seed;
+set an explicit default to use a negative sentinel. Optional reference lists
+must permit their empty fallback or provide another default.
+
 `description` is optional workflow metadata. `workflow_list()` returns it in
 the workflow's `description` field, and `workflow_get_options()` includes it
 alongside the other YAML-backed options. Without a nonblank description, the
@@ -124,10 +150,12 @@ You can edit the YAML directly or call
 Omitting `description` in `workflow_configure` preserves its current value; an empty
 string removes it. Descriptions are metadata and are not workflow parameters.
 
-`wait_for_completion` controls the workflow's generation default. An explicit
-generation-tool argument overrides it; when neither is provided, the server
-waits for completion. Fire-and-forget workflows return their ComfyUI prompt ID
-and do not save output media locally.
+Generation holds runs by default; `wait_for_completion` does not bypass the held
+queue. The workflow setting is captured for playback, overridden by an explicit
+generation argument, and defaults to `true`. `batch_play` can override the stored
+settings for that playback. Waiting returns media; submit-only playback returns
+ComfyUI prompt IDs without saving output locally. `enqueue: false` is an explicit
+immediate-generation bypass.
 
 Call `workflow_get_options(workflow_id)` to retrieve this YAML-backed data as
 structured JSON together with the parameters discovered in the workflow JSON.
@@ -294,6 +322,19 @@ The `parameter` field and `allowed_values` list appear when applicable.
 Common codes include `workflow_not_found`, `unknown_parameter`,
 `missing_default`, `invalid_default`, `invalid_value`, and `invalid_arguments`.
 Follow `next_step` to correct the request instead of retrying unchanged.
+
+ComfyUI submission failures use `workflow_rejected` and preserve the HTTP
+`status_code`, `comfy_error`, and original `node_errors`. A flattened
+`validation_errors` array contains each error's `node_id`, `class_type`,
+`input_name` when provided, `type`, `message`, `details`, and `extra_info`.
+Both structured content and JSON text contain the same error object. Non-JSON
+HTTP failures retain their `response_body` instead of being classified as bad
+workflow configuration.
+
+If ComfyUI returns a `prompt_id` alongside branch errors, the failure preserves
+it and sets `may_have_queued: true`. Inspect or cancel that job before submitting
+again: other output branches may already have been accepted. The MCP server
+does not automatically retry submissions.
 
 These tools replace the former mutation operations on `setup()`. Refresh the
 MCP connection to load the new schemas; migrate old calls to the named tools.

@@ -9,12 +9,15 @@ public sealed class WorkflowExecutionService(ComfyClient client)
     public Task<ComfySubmissionResult> SubmitAsync(JsonObject workflow, CancellationToken cancellationToken) =>
         client.SubmitAsync(workflow, cancellationToken: cancellationToken);
 
-    public async Task<CompletedWorkflow> RunAsync(JsonObject workflow, string requestedMediaType, CancellationToken cancellationToken)
+    public async Task<CompletedWorkflow> RunAsync(JsonObject workflow, string requestedMediaType, CancellationToken cancellationToken,
+        Func<ComfySubmissionResult, Task>? onSubmitted = null, Func<Task>? onSubmitting = null)
     {
         var clientId = Guid.NewGuid().ToString("N");
         using var socket = new ClientWebSocket();
         await socket.ConnectAsync(WebSocketUri(client.BaseUrl, clientId), cancellationToken);
+        if (onSubmitting is not null) await onSubmitting();
         var submission = await client.SubmitAsync(workflow, clientId, cancellationToken);
+        if (onSubmitted is not null) await onSubmitted(submission);
         await WaitForCompletionAsync(socket, submission.PromptId, cancellationToken);
         var history = await client.GetHistoryAsync(submission.PromptId, cancellationToken);
         var entry = history[submission.PromptId] as JsonObject

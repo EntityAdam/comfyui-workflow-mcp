@@ -18,6 +18,7 @@ The agent should:
 2. Call `workflow_list()` if the interpolation workflow ID is not known.
 3. Call `generate_video()` with the selected `workflow_id`, the returned
    `workflow_value`, and the requested multiplier.
-4. Return the first completed video output to the client.
+4. Review the held run and wait for the user to ask to play the batch.
+5. Call `batch_play()` when requested and return the first completed video.
 
 Higher multipliers require more processing and produce larger outputs.

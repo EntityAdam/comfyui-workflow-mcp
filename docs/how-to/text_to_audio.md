@@ -11,9 +11,11 @@ The agent should:
 1. Call `workflow_list()` if no audio workflow ID or audio default is known.
 2. Call `generate_audio()` with the selected `workflow_id` and the parameters
    exposed by that workflow.
-3. Let the default completion mode wait and return the first audio output to
-   the client.
+3. Check the held run count with `batch_count()`.
+4. When the user explicitly asks to play the batch, call `batch_play()` to run it
+   and return the first audio output.
 
-For a long-running job that does not need an immediate result, set
-`wait_for_completion` to `false`. The call returns after ComfyUI accepts the
-job; `comfy_queue_list()` can then report whether it is running or pending.
+For long-running audio, use `batch_play(wait_for_completion: false)` when the
+user asks to play without waiting for media. `comfy_queue_list()` can then inspect
+the submitted jobs. Generation calls hold runs by default, including when their
+`wait_for_completion` argument is false.

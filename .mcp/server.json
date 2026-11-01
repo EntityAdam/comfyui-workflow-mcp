@@ -2,7 +2,7 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.EntityAdam/comfyui-workflow-mcp",
   "title": "ComfyUI Workflow MCP",
-  "description": "Run validated ComfyUI workflows through the Model Context Protocol.",
+  "description": "Queue validated ComfyUI workflow batches and play them explicitly through MCP.",
   "version": "0.0.1-preview5",
   "packages": [
     {
@@ -37,7 +37,7 @@
           "value": "{directory}",
           "variables": {
             "directory": {
-              "description": "Root directory containing settings.yaml, workflows, and input.",
+              "description": "Persistent root for settings.yaml, workflows, the held batch queue, assets, and output.",
               "isRequired": false,
               "isSecret": false
             }

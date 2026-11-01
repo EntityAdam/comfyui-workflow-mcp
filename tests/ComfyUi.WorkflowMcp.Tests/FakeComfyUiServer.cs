@@ -34,11 +34,19 @@ internal sealed class FakeComfyUiServer(
     private readonly ConcurrentDictionary<string, JsonObject> _history = new();
     private readonly byte[] _image = CreatePng();
     private int _promptSequence;
+    private int _submissionCount;
 
     public string BaseUrl { get; private set; } = "";
     public ConcurrentBag<string> HistoryRequests { get; } = [];
     public JsonObject? LastPromptBody { get; private set; }
     public string? LastWebSocketClientId { get; private set; }
+    public JsonObject NodeDefinitions { get; } = new();
+    public ConcurrentBag<string> NodeDefinitionRequests { get; } = [];
+    public JsonObject? SubmissionError { get; set; }
+    public int SubmissionStatusCode { get; set; } = 400;
+    public int SubmissionCount => _submissionCount;
+    public ConcurrentQueue<JsonObject> SubmittedPrompts { get; } = new();
+    public Func<CancellationToken, Task>? BeforeSubmission { get; set; }
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
@@ -51,6 +59,12 @@ internal sealed class FakeComfyUiServer(
             queue_pending = Array.Empty<object>()
         }));
         _app.MapGet("/models/diffusion_models", () => Results.Json(DiffusionModels));
+        _app.MapGet("/object_info/{classType}", (string classType) =>
+        {
+            NodeDefinitionRequests.Add(classType);
+            return Results.Json(NodeDefinitions[classType] is { } definition
+                ? new JsonObject { [classType] = definition.DeepClone() } : new JsonObject());
+        });
         _app.MapPost("/queue", () => Results.Json(new { success = true }));
         _app.MapPost("/interrupt", () => Results.Json(new { success = true }));
         _app.MapGet(
@@ -72,9 +86,13 @@ internal sealed class FakeComfyUiServer(
 
     private async Task<IResult> SubmitAsync(HttpRequest request)
     {
+        Interlocked.Increment(ref _submissionCount);
         LastPromptBody = await JsonNode.ParseAsync(
             request.Body, cancellationToken: request.HttpContext.RequestAborted)
             as JsonObject;
+        SubmittedPrompts.Enqueue(LastPromptBody!.DeepClone().AsObject());
+        if (BeforeSubmission is not null) await BeforeSubmission(request.HttpContext.RequestAborted);
+        if (SubmissionError is not null) return Results.Json(SubmissionError.DeepClone(), statusCode: SubmissionStatusCode);
         var promptId =
             $"prompt-{Interlocked.Increment(ref _promptSequence)}";
         _ = RunGenerationAsync(promptId, request.HttpContext.RequestAborted);
