@@ -31,6 +31,8 @@
 
 ### Added
 
+- Workflow YAML supports an optional `description`, editable through setup
+  and returned by `workflow_list()` and `workflow_get_options()`.
 - `asset_view(filename)` returns images from `assets/` as standard MCP image
   content, with filename, MIME type, and byte-count metadata. Added LM Studio
   compatibility notes and a manual check for model-context delivery.

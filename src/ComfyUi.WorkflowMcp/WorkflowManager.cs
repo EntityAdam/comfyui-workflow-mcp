@@ -5,7 +5,7 @@ using System.Globalization;
 
 namespace ComfyUi.WorkflowMcp;
 
-public sealed partial class WorkflowManager(IConfiguration configuration, TimeProvider? timeProvider = null)
+public sealed partial class WorkflowManager(IConfiguration configuration, WorkflowConfigurationManager workflowConfiguration, TimeProvider? timeProvider = null)
 {
     private readonly TimeProvider _clock = timeProvider ?? TimeProvider.System;
     public string DirectoryPath => Path.GetFullPath(configuration.WorkflowDirectory());
@@ -26,7 +26,7 @@ public sealed partial class WorkflowManager(IConfiguration configuration, TimePr
                 catalog.Add(new WorkflowCatalogEntry(
                     id,
                     id.Replace('_', ' '),
-                    $"Execute the '{id}' workflow.",
+                    workflowConfiguration.Load(id).Description ?? $"Execute the '{id}' workflow.",
                     parameters.ToDictionary(
                         x => x.Key,
                         x => (object)new { type = TypeName(x.Value.Type), description = x.Value.Description })));

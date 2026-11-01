@@ -65,6 +65,23 @@ public sealed class McpServerIntegrationTests(ComfyWorkflowMcpApplicationFactory
     }
 
     [Fact]
+    public async Task WorkflowListReturnsConfiguredYamlDescription()
+    {
+        using var toolFactory = new ComfyWorkflowMcpApplicationFactory();
+        using var toolClient = toolFactory.CreateClient();
+        var configured = await SendMcpAsync(toolClient,
+            """{"jsonrpc":"2.0","id":30,"method":"tools/call","params":{"name":"setup","arguments":{"operation":"configure_workflow","workflow_id":"test_image","description":"Generate illustrations with the test image workflow."}}}""");
+        Assert.True(StructuredContent(configured)["success"]!.GetValue<bool>(), configured.ToJsonString());
+
+        var response = await SendMcpAsync(toolClient,
+            """{"jsonrpc":"2.0","id":31,"method":"tools/call","params":{"name":"workflow_list","arguments":{}}}""");
+
+        var item = Assert.Single(StructuredContent(response)["workflows"]!.AsArray())!;
+        Assert.Equal("Generate illustrations with the test image workflow.", item["workflow"]!["description"]!.ToString());
+        Assert.Equal("Generate illustrations with the test image workflow.", item["validation"]!["description"]!.ToString());
+    }
+
+    [Fact]
     public async Task DiffusionModelListReturnsModelsReportedByComfyUi()
     {
         await using var comfyUi = new FakeComfyUiServer();
