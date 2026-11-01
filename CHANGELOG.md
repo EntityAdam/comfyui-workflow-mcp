@@ -29,6 +29,9 @@
 
 ### Added
 
+- `asset_view(filename)` returns images from `assets/` as standard MCP image
+  content, with filename, MIME type, and byte-count metadata. Added LM Studio
+  compatibility notes and a manual check for model-context delivery.
 - Workflow YAML can define `wait_for_completion`; an explicit generation-tool
   argument overrides it, and the fallback remains `true`.
 - Completed `generate_image()` calls save a uniquely named reusable copy under
