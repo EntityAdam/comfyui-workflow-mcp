@@ -28,7 +28,7 @@ public sealed class McpServerIntegrationTests(ComfyWorkflowMcpApplicationFactory
         string[] expected =
         [
             "setup", "workflow_list", "workflow_get", "workflow_get_options", "generate_image", "generate_audio", "generate_video",
-            "comfy_media_upload", "asset_stage", "asset_list", "asset_exists", "comfy_job_cancel", "comfy_queue_list", "comfy_queue_clear", "comfy_diffusion_model_list"
+            "comfy_media_upload", "asset_stage", "asset_list", "asset_exists", "asset_view", "comfy_job_cancel", "comfy_queue_list", "comfy_queue_clear", "comfy_diffusion_model_list"
         ];
         Assert.Equal(expected.Order(StringComparer.Ordinal), names);
     }
@@ -110,6 +110,65 @@ public sealed class McpServerIntegrationTests(ComfyWorkflowMcpApplicationFactory
             }.ToJsonString());
         var existsContent = StructuredContent(exists);
         Assert.True(existsContent["exists"]!.GetValue<bool>());
+    }
+
+    [Fact]
+    public async Task AssetViewReturnsImageBytesAsMcpImageContent()
+    {
+        const string png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=";
+        var staged = await SendMcpAsync(new JsonObject
+        {
+            ["jsonrpc"] = "2.0",
+            ["id"] = 20,
+            ["method"] = "tools/call",
+            ["params"] = new JsonObject
+            {
+                ["name"] = "asset_stage",
+                ["arguments"] = new JsonObject { ["data"] = png, ["filename"] = "reference.png", ["mime_type"] = "image/png" }
+            }
+        }.ToJsonString());
+        var filename = StructuredContent(staged)["filename"]!.ToString();
+
+        var response = await SendMcpAsync(new JsonObject
+        {
+            ["jsonrpc"] = "2.0",
+            ["id"] = 21,
+            ["method"] = "tools/call",
+            ["params"] = new JsonObject
+            {
+                ["name"] = "asset_view",
+                ["arguments"] = new JsonObject { ["filename"] = filename }
+            }
+        }.ToJsonString());
+
+        var result = response["result"]!;
+        Assert.False(result["isError"]?.GetValue<bool>() ?? false, response.ToJsonString());
+        var image = Assert.Single(result["content"]!.AsArray(), item => item!["type"]!.ToString() == "image")!;
+        Assert.Equal("image/png", image["mimeType"]!.ToString());
+        Assert.Equal(png, image["data"]!.ToString());
+        Assert.Equal(filename, StructuredContent(response)["filename"]!.ToString());
+        Assert.Equal(Convert.FromBase64String(png).Length, StructuredContent(response)["bytes"]!.GetValue<int>());
+    }
+
+    [Theory]
+    [InlineData("missing.png")]
+    [InlineData("../outside.png")]
+    public async Task AssetViewFailuresReturnToolErrorsWithoutImageContent(string filename)
+    {
+        var response = await SendMcpAsync(new JsonObject
+        {
+            ["jsonrpc"] = "2.0",
+            ["id"] = 22,
+            ["method"] = "tools/call",
+            ["params"] = new JsonObject
+            {
+                ["name"] = "asset_view",
+                ["arguments"] = new JsonObject { ["filename"] = filename }
+            }
+        }.ToJsonString());
+
+        Assert.True(response["result"]!["isError"]!.GetValue<bool>());
+        Assert.All(response["result"]!["content"]!.AsArray(), item => Assert.Equal("text", item!["type"]!.ToString()));
     }
 
     [Fact]

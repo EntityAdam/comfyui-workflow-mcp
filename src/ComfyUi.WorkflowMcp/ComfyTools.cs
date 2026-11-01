@@ -171,6 +171,35 @@ public sealed class ComfyTools(
         catch (Exception ex) { return new { exists = false, filename, error = ex.Message }; }
     }
 
+    [McpServerTool(Name = "asset_view"), Description("Read a PNG, JPEG, WebP, or GIF from the managed assets directory and return its image content to the MCP client. Use asset_list to discover filenames. Visual inspection requires a vision-capable model and a client that forwards tool images to the model; this server cannot detect the active model's vision capability or guarantee forwarding.")]
+    public async Task<CallToolResult> AssetView(
+        [Description("Image asset filename only, without directory components.")] string filename,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var image = await mediaAssets.ReadImageAsync(filename, cancellationToken);
+            return new CallToolResult
+            {
+                StructuredContent = JsonSerializer.SerializeToElement(new
+                {
+                    filename,
+                    mime_type = image.MimeType,
+                    bytes = image.Bytes.Length
+                }),
+                Content =
+                [
+                    ImageContentBlock.FromBytes(image.Bytes, image.MimeType),
+                    new TextContentBlock
+                    {
+                        Text = $"Returned image asset '{filename}'. Visual inspection requires the client to forward this image to a vision-capable model."
+                    }
+                ]
+            };
+        }
+        catch (Exception ex) when (!cancellationToken.IsCancellationRequested) { return Error(ex.Message); }
+    }
+
     [McpServerTool(Name = "comfy_job_cancel"), Description("Best-effort cancellation of one pending or currently running ComfyUI prompt.")]
     public async Task<object> ComfyJobCancel(string prompt_id, CancellationToken cancellationToken = default)
     {

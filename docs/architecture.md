@@ -21,6 +21,7 @@ Direct ComfyUI interaction is limited to:
 - `asset_stage()`
 - `asset_list()`
 - `asset_exists()`
+- `asset_view()`
 - `comfy_job_cancel()`
 - `comfy_queue_list()`
 - `comfy_queue_clear()`
@@ -70,6 +71,14 @@ audio, and video generation.
 `comfy_media_upload()` sends image, audio, and video references through
 ComfyUI's upload endpoint. Local paths must be in `assets`, created by
 `asset_stage`, beside the executable.
+
+`asset_view(filename)` reads an image from the configured root's `assets`
+directory and returns a standard MCP `ImageContentBlock` with base64 bytes
+and a MIME type, plus filename and byte-count metadata. It does not call
+ComfyUI or an LLM endpoint. Model selection, vision support, and forwarding
+the image into the conversation's model context belong to the MCP host;
+standard MCP client capabilities do not identify the active model's vision
+support.
 
 ## Trust model
 

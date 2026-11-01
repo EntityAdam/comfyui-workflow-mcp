@@ -110,6 +110,8 @@ output matching the requested media type.
 - `asset_stage()` saves base64 client media in `assets/` for upload.
 - `asset_list()` lists media staged in `assets/`.
 - `asset_exists()` validates a filename in `assets/`.
+- `asset_view(filename)` returns an image from `assets/` as MCP image content
+  for clients that forward tool images to a vision-capable model.
 - `comfy_diffusion_model_list()` lists installed diffusion models.
 - `comfy_job_cancel()` attempts to cancel a running job.
 - `comfy_queue_list()` reports running and pending jobs.
@@ -129,6 +131,16 @@ base64 media there; the server reads only the exact path supplied to
 Set `ComfyWorkflowMcp__Directory` to the root that should contain
 `settings.yaml`, `workflows`, `assets`, and `output`. See
 [Configuration](docs/configuration.md) for details.
+
+`asset_view()` accepts PNG, JPEG, WebP, and GIF filenames, including files
+placed directly in `assets/`. It rejects directory paths, symbolic links,
+empty files, and files larger than 100 MB. MIME types are inferred from the
+filename; the server does not decode or convert images.
+
+The MCP server cannot detect the client's active model or its vision support.
+The client controls whether returned images enter the model's context. See
+[LM Studio compatibility](docs/mcp-configuration.md#lm-studio-image-viewing)
+before relying on visual inspection in LM Studio.
 
 ## How-to guides
 

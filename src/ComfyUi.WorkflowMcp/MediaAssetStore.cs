@@ -46,6 +46,27 @@ public sealed partial class MediaAssetStore(IConfiguration configuration)
         return File.Exists(path) ? path : null;
     }
 
+    public async Task<(byte[] Bytes, string MimeType)> ReadImageAsync(
+        string filename,
+        CancellationToken cancellationToken)
+    {
+        var path = Find(filename)
+            ?? throw new ArgumentException("filename does not exist in the configured assets directory.", nameof(filename));
+        if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
+            throw new ArgumentException("Image assets must be regular files, not symbolic links.", nameof(filename));
+        var mimeType = ComfyClient.MimeFor(filename);
+        if (!mimeType.StartsWith("image/", StringComparison.Ordinal))
+            throw new ArgumentException("asset_view supports PNG, JPEG, WebP, and GIF image filenames only.", nameof(filename));
+
+        await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read,
+            81920, FileOptions.Asynchronous | FileOptions.SequentialScan);
+        if (stream.Length == 0 || stream.Length > MaximumDecodedBytes)
+            throw new ArgumentException("Image assets must contain between 1 byte and 100 MB.", nameof(filename));
+        var bytes = new byte[(int)stream.Length];
+        await stream.ReadExactlyAsync(bytes, cancellationToken);
+        return (bytes, mimeType);
+    }
+
     private static (string Encoded, string? MimeType) ParseData(string data)
     {
         const string marker = ";base64,";
