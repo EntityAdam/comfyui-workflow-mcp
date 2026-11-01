@@ -17,6 +17,7 @@ The agent should:
 2. Call `workflow_list()` if the workflow ID is not known.
 3. Call `generate_image()` with the upscaling `workflow_id` and the returned
    `workflow_value` for the workflow's image input.
-4. Return the first completed image output to the client.
+4. Review the held run and wait for the user to ask to play the batch.
+5. Call `batch_play()` when requested and return the first completed image.
 
 The required upscaler and custom nodes must already be installed in ComfyUI.

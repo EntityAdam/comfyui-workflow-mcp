@@ -15,8 +15,8 @@ The agent should:
 2. Call `workflow_list()` if no edit workflow ID or image default is known.
 3. Call `generate_image()` with the selected `workflow_id`, the returned
    `workflow_value`, and the edit prompt.
-4. Let the default completion mode wait and return the first image output to
-   the client.
+4. Check the held run count with `batch_count()` and wait for the user to ask to play.
+5. Call `batch_play()` when requested and return the first image output.
 
 If the workflow accepts a reference image, upload that file separately and pass
 its `workflow_value` to the matching parameter.

@@ -1,7 +1,7 @@
 # Architecture
 
-ComfyUI Workflow MCP keeps a small public tool surface and delegates execution
-state to ComfyUI.
+ComfyUI Workflow MCP holds planned runs locally until explicit batch playback,
+then delegates job execution to ComfyUI.
 
 ## Public MCP tools
 
@@ -15,9 +15,14 @@ The workflow-facing tools are:
 - `workflow_list()`
 - `workflow_get()`
 - `workflow_get_options()`
+- `workflow_preview()`
 - `generate_image()`
 - `generate_audio()`
 - `generate_video()`
+- `batch_count()`
+- `batch_remove()`
+- `batch_clear()`
+- `batch_play()`
 
 Direct ComfyUI interaction is limited to:
 
@@ -29,6 +34,7 @@ Direct ComfyUI interaction is limited to:
 - `comfy_job_cancel()`
 - `comfy_queue_list()`
 - `comfy_queue_clear()`
+- `comfy_diffusion_model_list()`
 
 `workflow_list()` returns only workflow IDs, descriptions, and media types.
 `workflow_get_options()` returns detailed configuration and parameters on demand.
@@ -40,13 +46,32 @@ Tool failures share a structured code, message, and recovery step, with MCP's
 
 Workflow execution helpers are internal APIs, not additional MCP tools.
 
+Stdio mode uses a generic host with the MCP stdio transport and logs on stderr;
+it does not start an HTTP listener or use the configured server port. HTTP mode
+uses the web host and exposes `/health` and `/mcp`.
+
+`WorkflowPreparationService` is shared by preview, held batches, and immediate
+generation. Capture resolves scalar and transform options and renders a fresh
+template without network calls. Playback applies ordered YAML transforms to the
+captured graph and checks the result. Named adapters
+support negative rgthree seed replacement and MiniMax ordered reference lists.
+They inspect required installed node schemas through ComfyUI's `object_info`
+endpoint. Prepared graphs are never saved over templates. See
+[workflow transforms](workflow-transforms.md) for adapter contracts and receipts.
+
 ## Completion modes
 
-The default backing path submits a workflow and waits for completion using
-ComfyUI's WebSocket and history APIs. The completed media is returned to the
-MCP client for display.
+Generation holds a run by default. `BatchQueueStore` persists snapshots and local
+submission states using atomic file replacement and storage/playback locks.
+`BatchQueueService` plays only the selected pending snapshot, records submission
+IDs before waiting, stops on errors, and avoids replay after uncertain dispatch.
+There is no automatic worker. See [held batches](batch-queue.md) for recovery and
+status semantics.
 
-When `wait_for_completion` is `false`, the generation tool submits through
+Playback or explicitly immediate generation can wait for completion using
+ComfyUI's WebSocket and history APIs and return media to the MCP client.
+
+When the effective `wait_for_completion` is `false`, playback submits through
 ComfyUI's HTTP API and returns without waiting. The job remains visible in
 ComfyUI's queue and may be managed with the queue tools.
 
@@ -77,6 +102,9 @@ reject known-invalid values before submission.
 The focused workflow tools edit copied JSON in place, add typed placeholders,
 merge YAML settings, restore defaults as literals, and persist default workflows
 for image, audio, and video. `setup()` only inspects state and returns guidance.
+Configuration updates validate the merged defaults, constraints, allowed values,
+and enabled transforms against the workflow before writing. Discovery and
+resolution use the same configuration validation and caller-requirement rules.
 
 ## Input media
 

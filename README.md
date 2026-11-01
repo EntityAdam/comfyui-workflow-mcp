@@ -46,6 +46,9 @@ another URL.
 Some clients call the top-level property `servers` instead of `mcpServers`.
 Restart or refresh the MCP client after saving the configuration.
 
+Stdio mode does not open an HTTP port; its logs go to stderr. The configured
+server URL applies only when running in HTTP mode.
+
 ### 3. Let your agent finish setup
 
 Ask:
@@ -85,9 +88,13 @@ for update and removal examples. Workflow edits return compact change receipts;
 
 ### Generation
 
-- `generate_image()` runs an image workflow.
-- `generate_audio()` runs an audio workflow.
-- `generate_video()` runs a video workflow.
+- `generate_image()` adds an image run to the held batch.
+- `generate_audio()` adds an audio run to the held batch.
+- `generate_video()` adds a video run to the held batch.
+- `batch_count()` returns the number of held runs awaiting Play.
+- `batch_remove(entry_id)` removes one pending or failed run.
+- `batch_clear()` removes pending and failed held runs.
+- `batch_play()` starts the pending batch only when the user asks to play it.
 - `workflow_list()` lists discovered workflow IDs, descriptions from workflow
   YAML when configured, and media types. Parameters and validation are returned
   only by `workflow_get_options()`.
@@ -95,18 +102,27 @@ for update and removal examples. Workflow edits return compact change receipts;
   input inspection; `workflow_id` is mandatory.
 - `workflow_get_options(workflow_id)` returns YAML-backed defaults, allowed
   values, constraints, and discovered parameters with their node/input bindings.
+- `workflow_preview(workflow_id, options)` prepares the graph without submitting
+  it and returns the transform changes.
+
+Workflow YAML can declare ordered transforms for negative rgthree seed
+replacement and MiniMax reference-media lists. See
+[workflow transforms](docs/workflow-transforms.md) for configuration and examples.
 
 Each generation call requires `workflow_id` unless `workflow_set_default()`
 has selected a default for that media type.
 
-Generation uses the workflow YAML's `wait_for_completion` value, defaulting to
-`true`, and returns media for the MCP client to display when waiting. Set the
-generation argument explicitly to override the workflow default;
-the tool queues the workflow on ComfyUI and returns its prompt ID without
-waiting for media. The wait and submit paths are internal APIs, not separate
-MCP tools.
+Generation queues a persistent snapshot locally by default, without submitting
+to ComfyUI. Accumulate runs, check the count, then tell the agent to play the batch.
+Agents must not automatically Play after adding runs. See
+[held batches](docs/batch-queue.md) for the complete workflow.
 
-Completed generation calls save a uniquely named copy under the configured
+Playback honors each run's `wait_for_completion` setting (generation argument,
+then YAML, then `true`). `batch_play(wait_for_completion: false)` submits the
+batch without waiting and returns prompt IDs; `true` waits and returns media.
+For an explicitly requested immediate run, set `enqueue: false` on generation.
+
+Waiting runs save a uniquely named copy under the configured
 root's `output` subdirectory. The result includes `saved_path` and
 `output_filename`. Submit-only calls do not save a local copy.
 

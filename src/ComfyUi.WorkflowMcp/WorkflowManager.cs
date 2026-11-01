@@ -39,12 +39,14 @@ public sealed partial class WorkflowManager(IConfiguration configuration, Workfl
         return catalog;
     }
 
-    public JsonObject? Load(string workflowId)
+    public JsonObject? Load(string workflowId) => LoadFromDirectory(DirectoryPath, workflowId);
+
+    internal static JsonObject? LoadFromDirectory(string directoryPath, string workflowId)
     {
         var safe = SafeId(workflowId);
         if (safe is null) return null;
-        var path = Path.Combine(DirectoryPath, safe + ".json");
-        if (!File.Exists(path) || !PathSafety.IsWithin(path, DirectoryPath)) return null;
+        var path = Path.Combine(directoryPath, safe + ".json");
+        if (!File.Exists(path) || !PathSafety.IsWithin(path, directoryPath)) return null;
         try { return JsonNode.Parse(File.ReadAllText(path))?.AsObject(); }
         catch (JsonException) { return null; }
     }
@@ -53,6 +55,11 @@ public sealed partial class WorkflowManager(IConfiguration configuration, Workfl
     {
         var workflow = Load(workflowId)
             ?? throw new ArgumentException($"Workflow '{workflowId}' not found.");
+        return RenderResolved(workflow, values);
+    }
+
+    internal JsonObject RenderResolved(JsonObject workflow, JsonObject values)
+    {
         ApplyDatePlaceholders(workflow);
         var parameters = ExtractParameters(workflow);
         foreach (var parameter in parameters.Values)
@@ -69,7 +76,9 @@ public sealed partial class WorkflowManager(IConfiguration configuration, Workfl
         return workflow;
     }
 
-    public IReadOnlyDictionary<string, WorkflowParameter> ExtractParameters(JsonObject workflow)
+    public IReadOnlyDictionary<string, WorkflowParameter> ExtractParameters(JsonObject workflow) => DiscoverParameters(workflow);
+
+    internal static IReadOnlyDictionary<string, WorkflowParameter> DiscoverParameters(JsonObject workflow)
     {
         var result = new Dictionary<string, WorkflowParameter>();
         foreach (var (nodeId, node) in workflow)
@@ -195,15 +204,19 @@ public sealed partial class WorkflowManager(IConfiguration configuration, Workfl
         return (Normalize(token), type);
     }
 
-    private static JsonValue Coerce(JsonNode value, Type type)
+    internal static JsonValue Coerce(JsonNode value, Type type)
     {
+        if (value is not JsonValue) throw new ArgumentException("Parameter values must be scalars.");
         var text = value.ToString();
-        if (type == typeof(long) && long.TryParse(text, out var l)) return JsonValue.Create(l)!;
-        if (type == typeof(double) && double.TryParse(text, System.Globalization.CultureInfo.InvariantCulture, out var d)) return JsonValue.Create(d)!;
+        if (type == typeof(long) && long.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var l)) return JsonValue.Create(l)!;
+        if (type == typeof(double) && double.TryParse(text, CultureInfo.InvariantCulture, out var d) && double.IsFinite(d)) return JsonValue.Create(d)!;
         if (type == typeof(bool) && bool.TryParse(text, out var b)) return JsonValue.Create(b)!;
         if (type == typeof(string)) return JsonValue.Create(text)!;
         throw new ArgumentException($"Cannot convert '{text}' to {TypeName(type)}.");
     }
+
+    internal static bool ContainsParameterPlaceholder(JsonNode value) =>
+        value is JsonValue scalar && scalar.TryGetValue<string>(out var text) && EmbeddedPlaceholderRegex().IsMatch(text);
 
     private static string? SafeId(string id)
     {

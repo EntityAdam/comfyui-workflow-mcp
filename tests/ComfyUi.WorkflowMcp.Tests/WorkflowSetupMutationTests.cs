@@ -110,10 +110,14 @@ public sealed class WorkflowSetupMutationTests
         var (configuration, workflows) = CreateWorkflow(temp.Path);
         var defaults = new JsonObject { ["cfg"] = 7.5 };
         if (defaultJson is not null) defaults[secondName] = JsonNode.Parse(defaultJson);
-        configuration.SaveWorkflow("image", "image", null, defaults, null,
-            JsonNode.Parse("""{"steps":{"maximum":20}}""")!.AsObject());
         var jsonPath = Path.Combine(temp.Path, "workflows", "image.json");
         var yamlPath = Path.ChangeExtension(jsonPath, ".yaml");
+        // Simulate an invalid externally edited YAML file; configuration tools now reject these values.
+        File.WriteAllText(yamlPath, new JsonObject
+        {
+            ["defaults"] = defaults,
+            ["constraints"] = JsonNode.Parse("""{"steps":{"maximum":20}}""")
+        }.ToJsonString());
         var json = File.ReadAllText(jsonPath);
         var yaml = File.ReadAllText(yamlPath);
 
@@ -127,7 +131,10 @@ public sealed class WorkflowSetupMutationTests
     public void IncrementalUpdatesPreserveLegacyModelDefault()
     {
         using var temp = new TempDirectory();
-        var (configuration, _) = CreateWorkflow(temp.Path);
+        var (configuration, workflows) = CreateWorkflow(temp.Path);
+        var workflow = workflows.Load("image")!;
+        workflow["5"] = JsonNode.Parse("""{"class_type":"Loader","inputs":{"model":"PARAM_MODEL"}}""");
+        File.WriteAllText(Path.Combine(temp.Path, "workflows", "image.json"), workflow.ToJsonString());
         File.WriteAllText(Path.Combine(temp.Path, "workflows", "image.yaml"), "model: example.safetensors\n");
 
         configuration.SaveWorkflow("image", null, null, new JsonObject { ["cfg"] = 7 }, null, null);

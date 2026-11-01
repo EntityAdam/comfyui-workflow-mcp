@@ -2,7 +2,34 @@
 
 ## Unreleased
 
+### Added
+
+- A persistent held batch queue is now the default generation path. Generation
+  captures workflow/options snapshots without submission; `batch_count`,
+  `batch_remove`, `batch_clear`, and explicit `batch_play` manage playback.
+  Playback supports both completion modes, stops on errors, and retains uncertain
+  submission records across restarts. `enqueue: false` opts into immediate runs.
+
+- Ordered YAML transforms for replacing negative rgthree seed nodes and building
+  MiniMax image, video, and audio reference subgraphs from ordered media lists.
+- `workflow_preview` prepares a graph without submission. Preview and both
+  generation completion modes share node-schema checks, graph validation, and
+  transform receipts while preserving saved templates.
+
 ### Changed
+
+- Stdio mode uses a generic host without opening an HTTP listener, so an occupied
+  server port does not prevent MCP use. Logs are written to stderr.
+- Workflow configuration validates the complete merged defaults, allowed values,
+  constraints, and transform options before saving. Optional scalar parameters
+  require a default or automatic seed fallback; discovery reports actual caller
+  requirements.
+- ComfyUI rejections return structured node/input validation details and preserve
+  prompt IDs for partially accepted submissions, including the original server
+  errors and HTTP status.
+
+- YAML loading preserves quoted strings, including numeric node IDs, instead of
+  coercing them into numbers.
 
 - Parameter mapping schemas now require node ID, input name, and a string type
   enum. Tool errors share stable codes, messages, and recovery steps, including

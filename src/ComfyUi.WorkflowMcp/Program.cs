@@ -3,10 +3,17 @@ using Microsoft.Extensions.Http.Resilience;
 using ModelContextProtocol.Protocol;
 using System.Text.Json;
 
-var builder = WebApplication.CreateBuilder(args);
+var stdio = args.Contains("--stdio", StringComparer.Ordinal);
+IHostApplicationBuilder builder = stdio
+    ? Host.CreateApplicationBuilder(args)
+    : WebApplication.CreateBuilder(args);
+if (stdio) builder.Logging.AddConsole(options => options.LogToStandardErrorThreshold = LogLevel.Trace);
 builder.Services.AddSingleton<WorkflowManager>();
 builder.Services.AddSingleton<WorkflowConfigurationManager>();
 builder.Services.AddSingleton<GenerationOptionsService>();
+builder.Services.AddSingleton<WorkflowPreparationService>();
+builder.Services.AddSingleton<BatchQueueStore>();
+builder.Services.AddSingleton<BatchQueueService>();
 builder.Services.AddSingleton<WorkflowExecutionService>();
 builder.Services.AddSingleton<GeneratedMediaStore>();
 builder.Services.AddSingleton<MediaAssetStore>();
@@ -20,7 +27,6 @@ builder.Services
         options.Retry.DisableForUnsafeHttpMethods();
     });
 
-var stdio = args.Contains("--stdio", StringComparer.Ordinal);
 var mcp = builder.Services
     .AddMcpServer()
     .WithTools<ComfyTools>()
@@ -67,14 +73,18 @@ var mcp = builder.Services
 if (stdio) mcp.WithStdioServerTransport();
 else mcp.WithHttpTransport(options => options.Stateless = true);
 
-var app = builder.Build();
-app.MapGet("/health", (IConfiguration configuration) =>
-    Results.Ok(new { status = "ok", comfyui = configuration.BaseUrl() }));
-if (string.IsNullOrWhiteSpace(builder.Configuration["urls"]))
-    app.Urls.Add(builder.Configuration.ServerUrl());
-if (stdio) await app.RunAsync();
+if (builder is HostApplicationBuilder stdioBuilder)
+{
+    using var host = stdioBuilder.Build();
+    await host.RunAsync();
+}
 else
 {
+    var app = ((WebApplicationBuilder)builder).Build();
+    app.MapGet("/health", (IConfiguration configuration) =>
+        Results.Ok(new { status = "ok", comfyui = configuration.BaseUrl() }));
+    if (string.IsNullOrWhiteSpace(builder.Configuration["urls"]))
+        app.Urls.Add(builder.Configuration.ServerUrl());
     app.MapMcp("/mcp");
     await app.RunAsync();
 }

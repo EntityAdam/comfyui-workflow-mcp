@@ -1,5 +1,6 @@
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 
 namespace ComfyUi.WorkflowMcp;
@@ -13,16 +14,32 @@ public sealed class ComfyClient(HttpClient httpClient, IConfiguration configurat
         var payload = new JsonObject { ["prompt"] = workflow.DeepClone() };
         if (!string.IsNullOrWhiteSpace(clientId)) payload["client_id"] = clientId;
         using var response = await httpClient.PostAsJsonAsync($"{BaseUrl}/prompt", payload, cancellationToken);
-        var body = await response.Content.ReadFromJsonAsync<JsonObject>(cancellationToken);
-        if (!response.IsSuccessStatusCode) throw new ToolFailureException("workflow_rejected", $"ComfyUI rejected workflow ({(int)response.StatusCode}): {body}", "Inspect the ComfyUI node errors and correct the workflow.");
+        var responseText = await response.Content.ReadAsStringAsync(cancellationToken);
+        JsonObject? body = null;
+        try { body = JsonNode.Parse(responseText) as JsonObject; }
+        catch (JsonException) when (!response.IsSuccessStatusCode) { /* Preserve non-JSON HTTP failures as workflow rejections. */ }
+        if (!response.IsSuccessStatusCode) throw new ComfyWorkflowRejectedException((int)response.StatusCode, body, responseText);
         if (body?["node_errors"] is JsonObject nodeErrors && nodeErrors.Count > 0)
-            throw new ToolFailureException("workflow_rejected", $"ComfyUI rejected one or more output branches: {nodeErrors}", "Inspect the ComfyUI node errors and correct the workflow.");
+            throw new ComfyWorkflowRejectedException((int)response.StatusCode, body, responseText);
         var promptId = body?["prompt_id"]?.ToString() ?? throw new InvalidOperationException($"ComfyUI did not return prompt_id: {body}");
         return new ComfySubmissionResult(promptId, body["number"]?.GetValue<int>(), workflow.DeepClone().AsObject());
     }
 
     public async Task<JsonObject> GetQueueAsync(CancellationToken cancellationToken = default) =>
         await httpClient.GetFromJsonAsync<JsonObject>($"{BaseUrl}/queue", cancellationToken) ?? [];
+
+    public async Task<JsonObject> GetNodeDefinitionAsync(string classType, CancellationToken cancellationToken = default)
+    {
+        using var response = await httpClient.GetAsync($"{BaseUrl}/object_info/{Uri.EscapeDataString(classType)}", cancellationToken);
+        if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+            throw MissingNode(classType);
+        response.EnsureSuccessStatusCode();
+        var definitions = await response.Content.ReadFromJsonAsync<JsonObject>(cancellationToken);
+        return definitions?[classType] as JsonObject ?? throw MissingNode(classType);
+    }
+
+    private static ToolFailureException MissingNode(string classType) => new("node_unavailable",
+        $"ComfyUI does not provide node '{classType}'.", "Install the required node or disable the workflow transform.");
     public async Task<JsonObject> GetHistoryAsync(string promptId, CancellationToken cancellationToken = default) =>
         await httpClient.GetFromJsonAsync<JsonObject>($"{BaseUrl}/history/{Uri.EscapeDataString(promptId)}", cancellationToken) ?? [];
 

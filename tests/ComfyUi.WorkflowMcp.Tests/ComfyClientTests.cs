@@ -7,6 +7,68 @@ namespace ComfyUi.WorkflowMcp.Tests;
 
 public sealed class ComfyClientTests
 {
+    internal const string Rejection = """
+        {"error":{"type":"prompt_outputs_failed_validation","message":"Prompt outputs failed validation","details":"","extra_info":{}},
+         "node_errors":{"sampler:7":{"class_type":"KSampler","dependent_outputs":["9"],"errors":[
+           {"type":"value_smaller_than_min","message":"Value smaller than min","details":"steps: 0 < 1",
+            "extra_info":{"input_name":"steps","input_config":["INT",{"min":1}],"received_value":0}},
+           {"type":"required_input_missing","message":"Required input is missing","details":"model","extra_info":{"input_name":"model"}}
+         ]}}}
+        """;
+
+    [Theory]
+    [InlineData(HttpStatusCode.BadRequest, false)]
+    [InlineData(HttpStatusCode.OK, true)]
+    public async Task WorkflowRejectionsRetainStructuredNodeAndInputDetails(HttpStatusCode status, bool acceptedBranches)
+    {
+        var body = JsonNode.Parse(Rejection)!.AsObject();
+        if (acceptedBranches) body["prompt_id"] = "accepted-branch";
+        var expected = body.DeepClone();
+        var requests = 0;
+        using var http = new HttpClient(new AsyncHandler(_ =>
+        {
+            requests++;
+            var response = Json(body.ToJsonString());
+            response.StatusCode = status;
+            return Task.FromResult(response);
+        }));
+        var failure = await Assert.ThrowsAsync<ComfyWorkflowRejectedException>(() => Create(http).SubmitAsync([], cancellationToken: TestContext.Current.CancellationToken));
+        var error = ToolErrors.Describe(failure, "fallback");
+        Assert.Equal("workflow_rejected", error["error"]!.ToString());
+        Assert.Equal((int)status, error["status_code"]!.GetValue<int>());
+        Assert.True(JsonNode.DeepEquals(expected["node_errors"], error["node_errors"]));
+        Assert.True(JsonNode.DeepEquals(expected["error"], error["comfy_error"]));
+        var validation = error["validation_errors"]!.AsArray();
+        Assert.Equal(2, validation.Count);
+        Assert.Equal("sampler:7", validation[0]!["node_id"]!.ToString());
+        Assert.Equal("KSampler", validation[0]!["class_type"]!.ToString());
+        Assert.Equal("steps", validation[0]!["input_name"]!.ToString());
+        Assert.Equal("value_smaller_than_min", validation[0]!["type"]!.ToString());
+        Assert.Equal("steps: 0 < 1", validation[0]!["details"]!.ToString());
+        Assert.Equal(0, validation[0]!["extra_info"]!["received_value"]!.GetValue<int>());
+        Assert.Equal(acceptedBranches, error["may_have_queued"]!.GetValue<bool>());
+        if (acceptedBranches)
+        {
+            Assert.Equal("accepted-branch", error["prompt_id"]!.ToString());
+            Assert.Contains("before resubmitting", error["next_step"]!.ToString(), StringComparison.Ordinal);
+        }
+        Assert.Equal(1, requests);
+    }
+
+    [Fact]
+    public async Task NonJsonHttpFailureRetainsStatusAndRejectionCode()
+    {
+        using var http = new HttpClient(new AsyncHandler(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
+        {
+            Content = new StringContent("Upstream unavailable", Encoding.UTF8, "text/plain")
+        })));
+        var failure = await Assert.ThrowsAsync<ComfyWorkflowRejectedException>(() => Create(http).SubmitAsync([], cancellationToken: TestContext.Current.CancellationToken));
+        var error = ToolErrors.Describe(failure, "fallback");
+        Assert.Equal("workflow_rejected", error["error"]!.ToString());
+        Assert.Equal(503, error["status_code"]!.GetValue<int>());
+        Assert.Equal("Upstream unavailable", error["response_body"]!.ToString());
+    }
+
     [Fact]
     public async Task DiffusionModelListUsesComfyUiModelsEndpoint()
     {

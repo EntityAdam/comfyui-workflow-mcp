@@ -54,6 +54,8 @@ public static class ToolErrors
         else if (exception is ArgumentException { ParamName: { } argument }) result["parameter"] = argument;
         if (exception is GenerationParameterException { AllowedValues.Count: > 0 } generation)
             result["allowed_values"] = new JsonArray(generation.AllowedValues.Select(value => JsonValue.Create(value)).ToArray());
+        if (exception is ComfyWorkflowRejectedException rejected)
+            foreach (var (name, value) in rejected.Details()) result[name] = value?.DeepClone();
         return result;
     }
 

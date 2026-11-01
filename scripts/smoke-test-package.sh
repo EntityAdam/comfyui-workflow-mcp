@@ -63,9 +63,19 @@ import json
 import os
 import select
 import signal
+import socket
 import subprocess
 import sys
 import time
+
+# Stdio must remain usable even when its configured HTTP address is occupied.
+occupied_listener = socket.socket()
+occupied_listener.bind(("127.0.0.1", 0))
+occupied_listener.listen()
+occupied_url = f"http://127.0.0.1:{occupied_listener.getsockname()[1]}"
+smoke_environment = dict(os.environ)
+smoke_environment["ComfyWorkflowMcp__ServerUrl"] = occupied_url
+smoke_environment["ASPNETCORE_URLS"] = occupied_url
 
 command = [
     "dnx",
@@ -87,6 +97,7 @@ process = subprocess.Popen(
     text=True,
     bufsize=1,
     start_new_session=True,
+    env=smoke_environment,
 )
 request = {
     "jsonrpc": "2.0",
@@ -161,6 +172,8 @@ try:
 except subprocess.TimeoutExpired:
     os.killpg(process.pid, signal.SIGKILL)
     process.wait()
+
+occupied_listener.close()
 
 result = workflow_response.get("result", {}) if workflow_response is not None else {}
 structured = result.get("structuredContent")
