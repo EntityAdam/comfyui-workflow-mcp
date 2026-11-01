@@ -52,6 +52,12 @@ Run `workflow_list()` after adding a workflow. Each entry contains only
 for parameters and configuration, or `workflow_get()` for workflow JSON.
 The package intentionally ships without example workflows.
 
+`workflow_get_options(workflow_id)` includes a `bindings` list for each
+parameter, with the exact `node_id` and `input_name` of every bound input.
+Repeated occurrences within the same input appear once; bindings across
+multiple nodes are all listed. This includes embedded placeholders, so agents
+can inspect existing mappings without loading the entire workflow JSON.
+
 ## Workflow parameters
 
 `workflow_parameterize()` edits a copied workflow export and replaces node input values
@@ -183,7 +189,10 @@ inputs and use their exact node ID and input key. Call
 }
 ```
 
-The supported types are `string`, `integer`, `number`, and `boolean`. `workflow_parameterize`
+The parameter-mapping schema requires `node_id`, `input_name`, and `type` for
+each entry. The type is a string enum: `string`, `integer`, `number`, or
+`boolean`; numeric enum values and unknown type names are rejected before
+the workflow is changed. `workflow_parameterize`
 replaces the selected literal inputs with typed `PARAM_*` placeholders in the
 workflow copy. Follow it with `workflow_configure` to record defaults and known
 validation rules, then inspect the result with `workflow_get_options()`.
@@ -266,7 +275,25 @@ lists identify affected parameters. Binding edits report `parameters_updated`
 and any `parameters_removed`; restoring literals reports `parameters_restored`.
 An unchanged update returns only `success` and `workflow_id`.
 `workflow_set_default` returns the media type and `default_updated` boolean.
-Failures return `success: false` and an `error`, without a success receipt.
+Failures return a stable error code, a message, and one recovery step:
+
+```json
+{
+  "success": false,
+  "error": "missing_default",
+  "message": "Parameter 'cfg' requires a YAML default.",
+  "parameter": "cfg",
+  "next_step": "Set defaults.cfg with workflow_configure."
+}
+```
+
+The same error shape is used by read, mutation, generation, and asset tools.
+Errors set MCP's `isError` flag and include this object in both structured
+content and JSON text, including input-binding failures before a tool runs.
+The `parameter` field and `allowed_values` list appear when applicable.
+Common codes include `workflow_not_found`, `unknown_parameter`,
+`missing_default`, `invalid_default`, `invalid_value`, and `invalid_arguments`.
+Follow `next_step` to correct the request instead of retrying unchanged.
 
 These tools replace the former mutation operations on `setup()`. Refresh the
 MCP connection to load the new schemas; migrate old calls to the named tools.

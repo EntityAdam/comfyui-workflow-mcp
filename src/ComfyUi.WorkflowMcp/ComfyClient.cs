@@ -14,9 +14,9 @@ public sealed class ComfyClient(HttpClient httpClient, IConfiguration configurat
         if (!string.IsNullOrWhiteSpace(clientId)) payload["client_id"] = clientId;
         using var response = await httpClient.PostAsJsonAsync($"{BaseUrl}/prompt", payload, cancellationToken);
         var body = await response.Content.ReadFromJsonAsync<JsonObject>(cancellationToken);
-        if (!response.IsSuccessStatusCode) throw new HttpRequestException($"ComfyUI rejected workflow ({(int)response.StatusCode}): {body}");
+        if (!response.IsSuccessStatusCode) throw new ToolFailureException("workflow_rejected", $"ComfyUI rejected workflow ({(int)response.StatusCode}): {body}", "Inspect the ComfyUI node errors and correct the workflow.");
         if (body?["node_errors"] is JsonObject nodeErrors && nodeErrors.Count > 0)
-            throw new InvalidOperationException($"ComfyUI rejected one or more output branches: {nodeErrors}");
+            throw new ToolFailureException("workflow_rejected", $"ComfyUI rejected one or more output branches: {nodeErrors}", "Inspect the ComfyUI node errors and correct the workflow.");
         var promptId = body?["prompt_id"]?.ToString() ?? throw new InvalidOperationException($"ComfyUI did not return prompt_id: {body}");
         return new ComfySubmissionResult(promptId, body["number"]?.GetValue<int>(), workflow.DeepClone().AsObject());
     }
@@ -82,7 +82,7 @@ public sealed class ComfyClient(HttpClient httpClient, IConfiguration configurat
         if (!string.IsNullOrWhiteSpace(subfolder)) form.Add(new StringContent(subfolder), "subfolder");
         using var response = await httpClient.PostAsync($"{BaseUrl}/upload/image", form, cancellationToken);
         var body = await response.Content.ReadFromJsonAsync<JsonObject>(cancellationToken);
-        if (!response.IsSuccessStatusCode) throw new HttpRequestException($"ComfyUI rejected input upload ({(int)response.StatusCode}): {body}");
+        if (!response.IsSuccessStatusCode) throw new ToolFailureException("upload_rejected", $"ComfyUI rejected input upload ({(int)response.StatusCode}): {body}", "Check the asset format supported by ComfyUI's upload endpoint.");
         return new ComfyInputUpload(
             body?["name"]?.ToString() ?? throw new InvalidOperationException($"ComfyUI upload did not return a name: {body}"),
             body["subfolder"]?.ToString() ?? "",

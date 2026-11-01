@@ -17,7 +17,11 @@ public sealed class ComfyTools(
     MediaAssetStore mediaAssets)
 {
     [McpServerTool(Name = "setup"), Description("Show server paths, default workflows, and a guide to the workflow tools. Read-only.")]
-    public object Setup() => workflowConfiguration.Status(workflows);
+    public object Setup()
+    {
+        try { return workflowConfiguration.Status(workflows); }
+        catch (Exception ex) { return ToolErrors.Describe(ex, "Check the configured workflow directory and retry."); }
+    }
 
     [McpServerTool(Name = "workflow_configure"), Description("Update workflow YAML. Updates merge; send only changes. Omitted values stay unchanged. Null entries remove configuration.")]
     public object WorkflowConfigure(
@@ -35,34 +39,37 @@ public sealed class ComfyTools(
             ConfigureWorkflow(workflow_id, media_type, wait_for_completion, defaults, allowed_values, constraints, description);
             return ConfigurationReceipt(workflow_id, before, workflowConfiguration.Load(workflow_id));
         }
-        catch (Exception ex) { return new { success = false, error = ex.Message }; }
+        catch (Exception ex) { return ToolErrors.Describe(ex, "Read workflow_get_options and correct the configuration."); }
     }
 
     [McpServerTool(Name = "workflow_parameterize"), Description("Add or update workflow parameter bindings. Send only changed mappings; other bindings stay unchanged. Call setup for an example.")]
     public object WorkflowParameterize(
         string workflow_id,
-        [Description("Mappings by public parameter name. Each requires node_id (exact top-level JSON key), input_name, and type: string, integer, number, or boolean.")] JsonObject parameters)
+        [Description("Bindings keyed by public parameter name.")] Dictionary<string, WorkflowParameterMapping> parameters)
     {
         try
         {
             var before = workflows.Load(workflow_id)
-                ?? throw new ArgumentException($"Workflow '{workflow_id}' not found.");
-            workflowConfiguration.ParameterizeWorkflow(workflow_id, parameters, workflows);
+                ?? throw ToolFailureException.WorkflowNotFound(workflow_id);
+            foreach (var (name, mapping) in parameters)
+                if (mapping is null || string.IsNullOrWhiteSpace(mapping.NodeId) || string.IsNullOrWhiteSpace(mapping.InputName))
+                    throw new ToolFailureException("invalid_binding", "node_id and input_name must be nonempty strings.", "Read workflow_get and use an existing node_id and input_name.", name);
+            workflowConfiguration.ParameterizeWorkflow(workflow_id, JsonSerializer.SerializeToNode(parameters)!.AsObject(), workflows);
             var after = workflows.Load(workflow_id)!;
             var afterParameters = workflows.ExtractParameters(after);
             var changed = parameters.Where(pair =>
             {
-                var node = pair.Value!["node_id"]!.ToString();
-                var input = pair.Value!["input_name"]!.ToString();
+                var node = pair.Value.NodeId;
+                var input = pair.Value.InputName;
                 return !JsonNode.DeepEquals(before[node]!["inputs"]![input], after[node]!["inputs"]![input]);
             }).Select(pair => afterParameters.Values.Single(parameter => parameter.Bindings.Any(binding =>
-                binding.NodeId == pair.Value!["node_id"]!.ToString() && binding.InputName == pair.Value!["input_name"]!.ToString())).Name);
+                binding.NodeId == pair.Value.NodeId && binding.InputName == pair.Value.InputName)).Name);
             var receipt = Receipt(workflow_id);
             AddNames(receipt, "parameters_updated", changed);
             AddNames(receipt, "parameters_removed", workflows.ExtractParameters(before).Keys.Except(workflows.ExtractParameters(after).Keys));
             return receipt;
         }
-        catch (Exception ex) { return new { success = false, error = ex.Message }; }
+        catch (Exception ex) { return ToolErrors.Describe(ex, "Read workflow_get and correct the parameter mapping."); }
     }
 
     [McpServerTool(Name = "workflow_unparameterize"), Description("Restore selected parameters as fixed inputs using their current YAML defaults, then remove their configuration. Valid defaults are required; validation errors leave files unchanged.")]
@@ -74,13 +81,13 @@ public sealed class ComfyTools(
         {
             var before = workflowConfiguration.Load(workflow_id);
             var original = workflows.Load(workflow_id)
-                ?? throw new ArgumentException($"Workflow '{workflow_id}' not found.");
+                ?? throw ToolFailureException.WorkflowNotFound(workflow_id);
             workflowConfiguration.UnparameterizeWorkflow(workflow_id, parameter_names, workflows);
             var receipt = ConfigurationReceipt(workflow_id, before, workflowConfiguration.Load(workflow_id));
             AddNames(receipt, "parameters_restored", workflows.ExtractParameters(original).Keys.Except(workflows.ExtractParameters(workflows.Load(workflow_id)!).Keys));
             return receipt;
         }
-        catch (Exception ex) { return new { success = false, error = ex.Message }; }
+        catch (Exception ex) { return ToolErrors.Describe(ex, "Read workflow_get_options and set valid defaults before retrying."); }
     }
 
     [McpServerTool(Name = "workflow_set_default"), Description("Select the default workflow for image, audio, or video generation.")]
@@ -92,37 +99,48 @@ public sealed class ComfyTools(
             workflowConfiguration.SetDefaultWorkflow(media_type, workflow_id, workflows);
             return new { success = true, workflow_id, media_type = media_type.Trim().ToLowerInvariant(), default_updated = before != workflow_id };
         }
-        catch (Exception ex) { return new { success = false, error = ex.Message }; }
+        catch (Exception ex) { return ToolErrors.Describe(ex, "Call workflow_list and choose a workflow for the requested media type."); }
     }
 
     [McpServerTool(Name = "workflow_list"), Description("List workflow IDs, descriptions, and media types. Use workflow_get_options for parameters, defaults, and validation.")]
     public object WorkflowList()
     {
-        var catalog = workflows.Catalog()
-            .Select(item => new { workflow_id = item.Id, description = item.Description, media_type = workflowConfiguration.Load(item.Id).MediaType })
-            .ToArray();
-        return new { workflows = catalog, count = catalog.Length };
+        try
+        {
+            var catalog = workflows.Catalog()
+                .Select(item => new { workflow_id = item.Id, description = item.Description, media_type = workflowConfiguration.Load(item.Id).MediaType })
+                .ToArray();
+            return new { workflows = catalog, count = catalog.Length };
+        }
+        catch (Exception ex) { return ToolErrors.Describe(ex, "Check the configured workflow directory and retry."); }
     }
 
     [McpServerTool(Name = "workflow_get"), Description("Read one workflow's API-format JSON. Use workflow_list for IDs.")]
     public object WorkflowGet(
         [Description("Required workflow JSON filename without .json.")] string workflow_id)
     {
-        var workflow = workflows.Load(workflow_id)
-            ?? throw new ArgumentException($"Workflow '{workflow_id}' not found.");
-        return new { workflow_id, workflow };
+        try
+        {
+            var workflow = workflows.Load(workflow_id)
+                ?? throw ToolFailureException.WorkflowNotFound(workflow_id);
+            return new { workflow_id, workflow };
+        }
+        catch (Exception ex) { return ToolErrors.Describe(ex, "Call workflow_list and choose an existing workflow_id."); }
     }
 
     [McpServerTool(Name = "workflow_get_options"), Description("Read one workflow's parameters, defaults, validation rules, and metadata.")]
-    public object WorkflowGetOptions(string workflow_id) =>
-        generationOptions.GetOptions(workflow_id);
+    public object WorkflowGetOptions(string workflow_id)
+    {
+        try { return generationOptions.GetOptions(workflow_id); }
+        catch (Exception ex) { return ToolErrors.Describe(ex, "Call workflow_list and choose an existing workflow_id."); }
+    }
 
-    [McpServerTool(Name = "generate_image"), Description("Run an image workflow, wait for completion, and display its first image output.")]
+    [McpServerTool(Name = "generate_image"), Description("Run image generation. Waiting returns the first image; wait_for_completion=false returns a prompt ID without media.")]
     public Task<CallToolResult> GenerateImage(
         string prompt,
         string? workflow_id = null,
         JsonObject? options = null,
-        [Description("Override completion behavior. Omit to use this workflow's YAML wait_for_completion value, which defaults to true.")] bool? wait_for_completion = null,
+        [Description("True waits for media; false returns a prompt ID. Omitted uses YAML, defaulting to true.")] bool? wait_for_completion = null,
         CancellationToken cancellationToken = default)
     {
         var values = options?.DeepClone().AsObject() ?? [];
@@ -130,13 +148,13 @@ public sealed class ComfyTools(
         return RunGenerated("image", workflow_id, values, wait_for_completion, cancellationToken);
     }
 
-    [McpServerTool(Name = "generate_audio"), Description("Run an audio workflow, wait for completion, and return its first audio output.")]
+    [McpServerTool(Name = "generate_audio"), Description("Run audio generation. Waiting returns the first audio; wait_for_completion=false returns a prompt ID without media.")]
     public Task<CallToolResult> GenerateAudio(
         string tags,
         string lyrics,
         string? workflow_id = null,
         JsonObject? options = null,
-        [Description("Override completion behavior. Omit to use this workflow's YAML wait_for_completion value, which defaults to true.")] bool? wait_for_completion = null,
+        [Description("True waits for media; false returns a prompt ID. Omitted uses YAML, defaulting to true.")] bool? wait_for_completion = null,
         CancellationToken cancellationToken = default)
     {
         var values = options?.DeepClone().AsObject() ?? [];
@@ -145,12 +163,12 @@ public sealed class ComfyTools(
         return RunGenerated("audio", workflow_id, values, wait_for_completion, cancellationToken);
     }
 
-    [McpServerTool(Name = "generate_video"), Description("Run a video workflow, wait for completion, and return its first video output.")]
+    [McpServerTool(Name = "generate_video"), Description("Run video generation. Waiting returns the first video; wait_for_completion=false returns a prompt ID without media.")]
     public Task<CallToolResult> GenerateVideo(
         string prompt,
         string? workflow_id = null,
         JsonObject? options = null,
-        [Description("Override completion behavior. Omit to use this workflow's YAML wait_for_completion value, which defaults to true.")] bool? wait_for_completion = null,
+        [Description("True waits for media; false returns a prompt ID. Omitted uses YAML, defaulting to true.")] bool? wait_for_completion = null,
         CancellationToken cancellationToken = default)
     {
         var values = options?.DeepClone().AsObject() ?? [];
@@ -167,12 +185,12 @@ public sealed class ComfyTools(
         try
         {
             var path = mediaAssets.Find(filename)
-                ?? throw new ArgumentException("filename does not exist in the configured assets directory.");
+                ?? throw new ToolFailureException("asset_not_found", "filename does not exist in the configured assets directory.", "Call asset_list and choose an existing filename.", nameof(filename));
             await using var content = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, FileOptions.Asynchronous | FileOptions.SequentialScan);
             var upload = await client.UploadInputAsync(content, filename, ComfyClient.MimeFor(filename), overwrite: overwrite, cancellationToken: cancellationToken);
             return new { success = true, name = upload.Name, subfolder = upload.Subfolder, type = upload.Type, workflow_value = upload.WorkflowValue };
         }
-        catch (Exception ex) when (!cancellationToken.IsCancellationRequested) { return new { success = false, error = ex.Message }; }
+        catch (Exception ex) when (!cancellationToken.IsCancellationRequested) { return ToolErrors.Describe(ex, "Call asset_list and use an existing asset filename."); }
     }
 
     [McpServerTool(Name = "asset_stage"), Description("Stage media bytes supplied by the client. Never generate or reproduce base64 yourself. For existing assets, use asset_list and a filename instead.")]
@@ -187,18 +205,22 @@ public sealed class ComfyTools(
             var asset = await mediaAssets.StageAsync(data, filename, mime_type, cancellationToken);
             return new { success = true, filename = asset.Filename, mime_type = asset.MimeType, bytes = asset.Bytes };
         }
-        catch (Exception ex) when (!cancellationToken.IsCancellationRequested) { return new { success = false, error = ex.Message }; }
+        catch (Exception ex) when (!cancellationToken.IsCancellationRequested) { return ToolErrors.Describe(ex, "Have the client supply valid media bytes directly through asset_stage."); }
     }
 
     [McpServerTool(Name = "asset_list"), Description("List recognized image, video, and audio files in the managed assets directory. Other file types are omitted; media types are inferred from filename extensions.")]
     public object AssetList()
     {
-        var assets = mediaAssets.ListAssets();
-        return new
+        try
         {
-            assets = assets.Select(asset => new { filename = asset.Filename, mime_type = asset.MimeType, bytes = asset.Bytes }),
-            count = assets.Count
-        };
+            var assets = mediaAssets.ListAssets();
+            return new
+            {
+                assets = assets.Select(asset => new { filename = asset.Filename, mime_type = asset.MimeType, bytes = asset.Bytes }),
+                count = assets.Count
+            };
+        }
+        catch (Exception ex) { return ToolErrors.Describe(ex, "Check the configured assets directory and retry."); }
     }
 
     [McpServerTool(Name = "asset_exists"), Description("Check whether a filename exists in the managed assets directory.")]
@@ -210,7 +232,7 @@ public sealed class ComfyTools(
             var path = mediaAssets.Find(filename);
             return new { exists = path is not null, filename };
         }
-        catch (Exception ex) { return new { exists = false, filename, error = ex.Message }; }
+        catch (Exception ex) { return ToolErrors.Describe(ex, "Call asset_list and use a filename without directory components."); }
     }
 
     [McpServerTool(Name = "asset_view"), Description("Return an existing image as MCP image content. Use asset_list for filenames. Visual inspection requires a vision model and a client that forwards tool images.")]
@@ -239,14 +261,20 @@ public sealed class ComfyTools(
                 ]
             };
         }
-        catch (Exception ex) when (!cancellationToken.IsCancellationRequested) { return Error(ex.Message); }
+        catch (Exception ex) when (!cancellationToken.IsCancellationRequested) { return ToolErrors.Result(ex, "Call asset_list and choose an existing image filename."); }
     }
 
     [McpServerTool(Name = "comfy_job_cancel"), Description("Best-effort cancellation of one pending or currently running ComfyUI prompt.")]
     public async Task<object> ComfyJobCancel(string prompt_id, CancellationToken cancellationToken = default)
     {
-        try { return await client.CancelAsync(prompt_id, cancellationToken); }
-        catch (Exception ex) when (!cancellationToken.IsCancellationRequested) { return new { success = false, error = ex.Message }; }
+        try
+        {
+            var result = await client.CancelAsync(prompt_id, cancellationToken);
+            if (result["success"]?.GetValue<bool>() == false)
+                throw new ToolFailureException("job_not_found", $"Prompt '{prompt_id}' is not running or pending.", "Call comfy_queue_list and choose a running or pending prompt_id.", nameof(prompt_id));
+            return result;
+        }
+        catch (Exception ex) when (!cancellationToken.IsCancellationRequested) { return ToolErrors.Describe(ex, "Check the tool arguments and retry."); }
     }
 
     [McpServerTool(Name = "comfy_queue_list"), Description("List running and pending jobs directly from ComfyUI.")]
@@ -259,7 +287,7 @@ public sealed class ComfyTools(
             var pending = queue["queue_pending"] as JsonArray ?? [];
             return new { running, pending, running_count = running.Count, pending_count = pending.Count };
         }
-        catch (Exception ex) when (!cancellationToken.IsCancellationRequested) { return new { error = ex.Message }; }
+        catch (Exception ex) when (!cancellationToken.IsCancellationRequested) { return ToolErrors.Describe(ex, "Check the ComfyUI connection and retry."); }
     }
 
     [McpServerTool(Name = "comfy_diffusion_model_list"), Description("List diffusion models installed and available to ComfyUI.")]
@@ -270,14 +298,14 @@ public sealed class ComfyTools(
             var models = await client.GetDiffusionModelsAsync(cancellationToken);
             return new { models, count = models.Count };
         }
-        catch (Exception ex) when (!cancellationToken.IsCancellationRequested) { return new { error = ex.Message }; }
+        catch (Exception ex) when (!cancellationToken.IsCancellationRequested) { return ToolErrors.Describe(ex, "Check the ComfyUI connection and retry."); }
     }
 
     [McpServerTool(Name = "comfy_queue_clear"), Description("Clear pending ComfyUI jobs without interrupting the running job.")]
     public async Task<object> ComfyQueueClear(CancellationToken cancellationToken = default)
     {
         try { await client.ClearPendingAsync(cancellationToken); return new { success = true, cleared = "pending" }; }
-        catch (Exception ex) when (!cancellationToken.IsCancellationRequested) { return new { success = false, error = ex.Message }; }
+        catch (Exception ex) when (!cancellationToken.IsCancellationRequested) { return ToolErrors.Describe(ex, "Check the tool arguments and retry."); }
     }
 
     private async Task<CallToolResult> Run(string workflowId, JsonObject values, string? requestedMediaType, CancellationToken cancellationToken)
@@ -288,17 +316,13 @@ public sealed class ComfyTools(
             var mediaType = requestedMediaType ?? resolved.MediaType
                 ?? throw new InvalidOperationException($"Workflow '{workflowId}' has no media_type. Use workflow_configure to set image, audio, or video.");
             if (resolved.MediaType is not null && !string.Equals(resolved.MediaType, mediaType, StringComparison.OrdinalIgnoreCase))
-                throw new InvalidOperationException($"Workflow '{workflowId}' is configured for {resolved.MediaType}, not {mediaType}.");
+                throw new ToolFailureException("media_type_mismatch", $"Workflow '{workflowId}' is configured for {resolved.MediaType}, not {mediaType}.", $"Choose a workflow configured for {mediaType} generation.");
             var rendered = workflows.RenderResolved(workflowId, resolved.Values);
             var completed = await execution.RunAsync(rendered, mediaType, cancellationToken);
             var savedPath = await generatedMedia.SaveAsync(completed, cancellationToken);
             return MediaResult(completed, workflowId, savedPath);
         }
-        catch (GenerationParameterException ex)
-        {
-            return Error(ex.Message, new JsonObject { ["parameter"] = ex.Parameter, ["allowed_values"] = new JsonArray(ex.AllowedValues.Select(value => JsonValue.Create(value)).ToArray()) });
-        }
-        catch (Exception ex) when (!cancellationToken.IsCancellationRequested) { return Error(ex.Message); }
+        catch (Exception ex) when (!cancellationToken.IsCancellationRequested) { return Error(ex); }
     }
 
     private Task<CallToolResult> RunGenerated(
@@ -318,7 +342,7 @@ public sealed class ComfyTools(
                 ? Run(resolvedWorkflowId, values, mediaType, cancellationToken)
                 : Submit(resolvedWorkflowId, values, mediaType, cancellationToken);
         }
-        catch (Exception ex) { return Task.FromResult(Error(ex.Message)); }
+        catch (Exception ex) { return Task.FromResult(Error(ex)); }
     }
 
     private async Task<CallToolResult> Submit(
@@ -335,8 +359,8 @@ public sealed class ComfyTools(
                     resolved.MediaType,
                     requestedMediaType,
                     StringComparison.OrdinalIgnoreCase))
-                throw new InvalidOperationException(
-                    $"Workflow '{workflowId}' is configured for {resolved.MediaType}, not {requestedMediaType}.");
+                throw new ToolFailureException("media_type_mismatch",
+                    $"Workflow '{workflowId}' is configured for {resolved.MediaType}, not {requestedMediaType}.", $"Choose a workflow configured for {requestedMediaType} generation.");
             var rendered = workflows.RenderResolved(workflowId, resolved.Values);
             var submitted = await execution.SubmitAsync(rendered, cancellationToken);
             return new CallToolResult
@@ -357,27 +381,16 @@ public sealed class ComfyTools(
                 ]
             };
         }
-        catch (GenerationParameterException ex)
-        {
-            return Error(
-                ex.Message,
-                new JsonObject
-                {
-                    ["parameter"] = ex.Parameter,
-                    ["allowed_values"] = new JsonArray(
-                        ex.AllowedValues.Select(value => JsonValue.Create(value)).ToArray())
-                });
-        }
         catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
         {
-            return Error(ex.Message);
+            return Error(ex);
         }
     }
 
     private string ResolveWorkflowId(string mediaType, string? workflowId) =>
         !string.IsNullOrWhiteSpace(workflowId) ? workflowId :
         workflowConfiguration.DefaultWorkflow(mediaType) ??
-        throw new InvalidOperationException($"No default {mediaType} workflow is configured. Use workflow_set_default, or supply workflow_id.");
+        throw new ToolFailureException("default_workflow_not_set", $"No default {mediaType} workflow is configured.", $"Call workflow_set_default for {mediaType} generation.");
 
     private static CallToolResult MediaResult(
         CompletedWorkflow completed,
@@ -416,12 +429,8 @@ public sealed class ComfyTools(
         };
     }
 
-    private static CallToolResult Error(string message, JsonObject? metadata = null) => new()
-    {
-        IsError = true,
-        StructuredContent = metadata is null ? null : JsonSerializer.SerializeToElement(metadata),
-        Content = [new TextContentBlock { Text = message }]
-    };
+    private static CallToolResult Error(Exception exception) =>
+        ToolErrors.Result(exception, "Inspect this workflow in ComfyUI before retrying.");
 
     private static JsonObject Receipt(string workflowId) => new() { ["success"] = true, ["workflow_id"] = workflowId };
 
@@ -453,14 +462,14 @@ public sealed class ComfyTools(
     private string ConfigureWorkflow(string workflowId, string? mediaType, bool? waitForCompletion, JsonObject? defaults, JsonObject? allowedValues, JsonObject? constraints, string? description)
     {
         var workflow = workflows.Load(workflowId)
-            ?? throw new ArgumentException($"Workflow '{workflowId}' not found.");
+            ?? throw ToolFailureException.WorkflowNotFound(workflowId);
         var parameters = workflows.ExtractParameters(workflow);
         foreach (var configured in new[] { defaults, allowedValues, constraints }
                      .Where(value => value is not null)
                      .SelectMany(value => value!.Where(pair => pair.Value is not null).Select(pair => pair.Key))
                      .Distinct(StringComparer.Ordinal))
             if (!parameters.ContainsKey(configured))
-                throw new ArgumentException($"Workflow '{workflowId}' has no parameter '{configured}'.");
+                throw ToolFailureException.UnknownParameter(workflowId, configured);
         return workflowConfiguration.SaveWorkflow(workflowId, mediaType, waitForCompletion, defaults, allowedValues, constraints, description);
     }
 }

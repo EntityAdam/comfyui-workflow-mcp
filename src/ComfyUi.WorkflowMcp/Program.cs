@@ -1,5 +1,7 @@
 using ComfyUi.WorkflowMcp;
 using Microsoft.Extensions.Http.Resilience;
+using ModelContextProtocol.Protocol;
+using System.Text.Json;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddSingleton<WorkflowManager>();
@@ -22,13 +24,46 @@ var stdio = args.Contains("--stdio", StringComparer.Ordinal);
 var mcp = builder.Services
     .AddMcpServer()
     .WithTools<ComfyTools>()
-    .WithRequestFilters(filters => filters.AddListToolsFilter(next =>
-        async (context, cancellationToken) =>
+    .WithRequestFilters(filters =>
+    {
+        filters.AddListToolsFilter(next => async (context, cancellationToken) =>
         {
             var result = await next(context, cancellationToken);
             result.Tools = [.. result.Tools.OrderBy(tool => tool.Name, StringComparer.Ordinal)];
             return result;
-        }));
+        });
+        filters.AddCallToolFilter(next => async (context, cancellationToken) =>
+        {
+            const string recovery = "Use the required fields and types shown in this tool's input schema.";
+            try
+            {
+                var result = await next(context, cancellationToken);
+                // Object-returning tools may be encoded as JSON text by the SDK.
+                if (result.StructuredContent is null && result.Content.FirstOrDefault() is TextContentBlock text && text.Text.StartsWith('{'))
+                {
+                    try
+                    {
+                        var body = JsonSerializer.Deserialize<JsonElement>(text.Text);
+                        if (body.ValueKind == JsonValueKind.Object && body.TryGetProperty("success", out var failed) && failed.ValueKind == JsonValueKind.False)
+                            result.StructuredContent = body;
+                    }
+                    catch (JsonException) { /* Non-JSON text remains ordinary tool content. */ }
+                }
+                if (result.StructuredContent is { ValueKind: JsonValueKind.Object } structured &&
+                    structured.TryGetProperty("success", out var success) && success.ValueKind == JsonValueKind.False)
+                    result.IsError = true;
+                // The SDK may report binding failures before invoking a tool method.
+                if (result.IsError == true && result.StructuredContent is null)
+                    return ToolErrors.Result(new ToolFailureException("invalid_arguments",
+                        string.Join(" ", result.Content.OfType<TextContentBlock>().Select(block => block.Text)), recovery), recovery);
+                return result;
+            }
+            catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
+            {
+                return ToolErrors.Result(new ToolFailureException("invalid_arguments", ex.Message, recovery), recovery);
+            }
+        });
+    });
 if (stdio) mcp.WithStdioServerTransport();
 else mcp.WithHttpTransport(options => options.Stateless = true);
 

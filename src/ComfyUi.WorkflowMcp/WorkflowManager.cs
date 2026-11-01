@@ -60,7 +60,9 @@ public sealed partial class WorkflowManager(IConfiguration configuration, Workfl
             var value = values[parameter.Name]
                 ?? throw new ArgumentException(
                     $"No resolved value exists for parameter '{parameter.Name}'.");
-            var coerced = Coerce(value, parameter.Type);
+            JsonValue coerced;
+            try { coerced = Coerce(value, parameter.Type); }
+            catch (ArgumentException ex) { throw new GenerationParameterException(parameter.Name, ex.Message); }
             foreach (var binding in parameter.Bindings)
                 ApplyBinding(workflow, binding, coerced);
         }

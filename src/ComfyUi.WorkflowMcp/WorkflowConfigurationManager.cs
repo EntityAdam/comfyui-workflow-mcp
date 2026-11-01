@@ -77,7 +77,7 @@ public sealed partial class WorkflowConfigurationManager(IConfiguration configur
     {
         var normalizedType = NormalizeMediaType(mediaType);
         if (workflows.Load(workflowId) is null)
-            throw new ArgumentException($"Workflow '{workflowId}' not found.");
+            throw ToolFailureException.WorkflowNotFound(workflowId);
         var settings = LoadDocument(SettingsPath);
         var defaults = Object(settings["default_workflows"]);
         defaults[normalizedType] = workflowId;
@@ -128,7 +128,7 @@ public sealed partial class WorkflowConfigurationManager(IConfiguration configur
         WorkflowManager workflows)
     {
         var workflow = workflows.Load(workflowId)
-            ?? throw new ArgumentException($"Workflow '{workflowId}' not found.");
+            ?? throw ToolFailureException.WorkflowNotFound(workflowId);
         foreach (var (parameterName, specificationNode) in parameters)
         {
             var normalizedName = Normalize(parameterName);
@@ -142,7 +142,7 @@ public sealed partial class WorkflowConfigurationManager(IConfiguration configur
                 ?? throw new ArgumentException($"Parameter '{parameterName}' requires input_name.");
             var type = specification["type"]?.ToString() ?? "string";
             if (workflow[nodeId]?["inputs"] is not JsonObject inputs || !inputs.ContainsKey(inputName))
-                throw new ArgumentException($"Workflow input '{nodeId}.{inputName}' was not found.");
+                throw new ToolFailureException("binding_not_found", $"Workflow input '{nodeId}.{inputName}' was not found.", "Read workflow_get and use an existing node_id and input_name.", parameterName);
             inputs[inputName] = Placeholder(parameterName, type);
         }
         var path = Path.Combine(workflows.DirectoryPath, SafeName(workflowId) + ".json");
@@ -158,18 +158,27 @@ public sealed partial class WorkflowConfigurationManager(IConfiguration configur
         if (parameterNames.Count == 0)
             throw new ArgumentException("parameter_names must contain at least one parameter.");
         var workflow = workflows.Load(workflowId)
-            ?? throw new ArgumentException($"Workflow '{workflowId}' not found.");
+            ?? throw ToolFailureException.WorkflowNotFound(workflowId);
         var parameters = workflows.ExtractParameters(workflow);
         var validation = Load(workflowId);
         var names = parameterNames.Select(Normalize).Distinct(StringComparer.Ordinal).ToArray();
         foreach (var name in names)
         {
             if (!parameters.TryGetValue(name, out var parameter))
-                throw new ArgumentException($"Workflow '{workflowId}' has no parameter '{name}'.");
-            var value = validation.Defaults[name] as JsonValue
-                ?? throw new ArgumentException($"Parameter '{name}' requires a scalar YAML default before removing parameterization. Set it with workflow_configure first.");
-            ValidateValue(name, value, validation);
-            WorkflowManager.RestoreParameterDefault(workflow, parameter, value);
+                throw ToolFailureException.UnknownParameter(workflowId, name);
+            var defaultValue = validation.Defaults[name] ?? throw ToolFailureException.MissingDefault(name);
+            var value = defaultValue as JsonValue
+                ?? throw new GenerationParameterException(name, $"Default for '{name}' must be a scalar value.", code: "invalid_default", nextStep: $"Set a scalar defaults.{name} with workflow_configure.");
+            try
+            {
+                ValidateValue(name, value, validation);
+                WorkflowManager.RestoreParameterDefault(workflow, parameter, value);
+            }
+            catch (ArgumentException ex)
+            {
+                throw new GenerationParameterException(name, ex.Message, (ex as GenerationParameterException)?.AllowedValues,
+                    "invalid_default", $"Set a valid defaults.{name} with workflow_configure.");
+            }
         }
         var remaining = workflows.ExtractParameters(workflow);
         if (names.Any(remaining.ContainsKey))
@@ -252,7 +261,7 @@ public sealed partial class WorkflowConfigurationManager(IConfiguration configur
         var normalized = Normalize(value);
         return normalized is "image" or "audio" or "video"
             ? normalized
-            : throw new ArgumentException("media_type must be image, audio, or video.");
+            : throw new ToolFailureException("invalid_media_type", "media_type must be image, audio, or video.", "Use image, audio, or video for media_type.");
     }
 
     private static string SafeName(string value)

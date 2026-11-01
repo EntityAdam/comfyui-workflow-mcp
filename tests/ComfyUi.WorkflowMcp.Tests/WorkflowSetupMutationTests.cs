@@ -101,6 +101,7 @@ public sealed class WorkflowSetupMutationTests
     [InlineData("steps", null)]
     [InlineData("steps", "\"invalid\"")]
     [InlineData("steps", "10.5")]
+    [InlineData("steps", "[10]")]
     [InlineData("steps", "50")]
     [InlineData("prompt", "\"PARAM_PROMPT\"")]
     public void InvalidBatchRemovalLeavesBothFilesUnchanged(string secondName, string? defaultJson)

@@ -4,6 +4,9 @@
 
 ### Changed
 
+- Parameter mapping schemas now require node ID, input name, and a string type
+  enum. Tool errors share stable codes, messages, and recovery steps, including
+  input-binding errors; generation descriptions explain both completion modes.
 - `setup()` is now a read-only, no-argument guide. Workflow edits use
   `workflow_configure`, `workflow_parameterize`, `workflow_unparameterize`, and
   `workflow_set_default`, with compact change receipts. Existing clients must
@@ -42,6 +45,8 @@
 
 ### Added
 
+- `workflow_get_options()` returns every distinct node/input binding for each
+  parameter, including inputs with embedded placeholders.
 - `workflow_unparameterize(workflow_id, parameter_names)`
   restores selected bindings to their current YAML defaults and removes their
   defaults, allowed values, and constraints after validating all selections.

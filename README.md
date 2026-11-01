@@ -94,7 +94,7 @@ for update and removal examples. Workflow edits return compact change receipts;
 - `workflow_get(workflow_id)` returns one API-format workflow JSON for node and
   input inspection; `workflow_id` is mandatory.
 - `workflow_get_options(workflow_id)` returns YAML-backed defaults, allowed
-  values, constraints, and discovered parameters for one workflow.
+  values, constraints, and discovered parameters with their node/input bindings.
 
 Each generation call requires `workflow_id` unless `workflow_set_default()`
 has selected a default for that media type.
@@ -112,6 +112,10 @@ root's `output` subdirectory. The result includes `saved_path` and
 
 If a workflow produces more than one output, the server returns only the first
 output matching the requested media type.
+
+Tool errors return `success: false`, a stable `error` code, a `message`, and
+one `next_step`. Parameter-specific errors also identify the parameter and
+include allowed values when available.
 
 ### ComfyUI controls
 

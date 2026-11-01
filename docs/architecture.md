@@ -33,6 +33,10 @@ Direct ComfyUI interaction is limited to:
 `workflow_list()` returns only workflow IDs, descriptions, and media types.
 `workflow_get_options()` returns detailed configuration and parameters on demand.
 Workflow mutations return compact change receipts; empty change lists are omitted.
+Workflow options include each parameter's node/input bindings. Parameterization
+uses a typed mapping schema with required fields and a four-value type enum.
+Tool failures share a structured code, message, and recovery step, with MCP's
+`isError` flag set. Argument-binding errors are normalized at the MCP boundary.
 
 Workflow execution helpers are internal APIs, not additional MCP tools.
 

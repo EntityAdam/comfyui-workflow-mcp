@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json.Nodes;
 using Xunit;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace ComfyUi.WorkflowMcp.Tests;
 
@@ -155,7 +156,10 @@ public sealed class McpServerIntegrationTests(ComfyWorkflowMcpApplicationFactory
 
         receipt = await Configure("""{"defaults":{"unknown":1}}""");
         Assert.False(receipt["success"]!.GetValue<bool>());
-        Assert.Contains("no parameter", receipt["error"]!.ToString());
+        Assert.Equal("unknown_parameter", receipt["error"]!.ToString());
+        Assert.Contains("no parameter", receipt["message"]!.ToString());
+        Assert.Equal("unknown", receipt["parameter"]!.ToString());
+        Assert.NotEmpty(receipt["next_step"]!.ToString());
         Assert.False(receipt.ContainsKey("defaults_updated"));
     }
 
@@ -404,6 +408,148 @@ public sealed class McpServerIntegrationTests(ComfyWorkflowMcpApplicationFactory
     }
 
     [Fact]
+    public async Task ParameterMappingSchemaRequiresFieldsAndAdvertisesOnlyFourTypes()
+    {
+        var response = await SendMcpAsync("""{"jsonrpc":"2.0","id":50,"method":"tools/list","params":{}}""");
+        var tool = response["result"]!["tools"]!.AsArray().Single(item => item!["name"]!.ToString() == "workflow_parameterize")!;
+        var mapping = tool["inputSchema"]!["properties"]!["parameters"]!["additionalProperties"]!;
+        string[] required = ["input_name", "node_id", "type"];
+        Assert.Equal(required, mapping["required"]!.AsArray().Select(item => item!.ToString()).Order(StringComparer.Ordinal));
+        string[] types = ["boolean", "integer", "number", "string"];
+        Assert.Equal(types, mapping["properties"]!["type"]!["enum"]!.AsArray().Select(item => item!.ToString()).Order(StringComparer.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("string")]
+    [InlineData("integer")]
+    [InlineData("number")]
+    [InlineData("boolean")]
+    public async Task TypedMappingPreservesTheSelectedParameterType(string type)
+    {
+        using var toolFactory = new ComfyWorkflowMcpApplicationFactory();
+        using var toolClient = toolFactory.CreateClient();
+        var result = await CallStructuredAsync(toolClient, "workflow_parameterize", new JsonObject
+        {
+            ["workflow_id"] = "test_image",
+            ["parameters"] = new JsonObject
+            {
+                ["cfg"] = new JsonObject { ["node_id"] = "1", ["input_name"] = "cfg", ["type"] = type }
+            }
+        });
+        Assert.True(result["success"]!.GetValue<bool>());
+        var options = await CallStructuredAsync(toolClient, "workflow_get_options", new JsonObject { ["workflow_id"] = "test_image" });
+        Assert.Equal(type, options["parameters"]!["cfg"]!["type"]!.ToString());
+    }
+
+    [Theory]
+    [InlineData("""{"node_id":"1","input_name":"cfg","type":"float"}""")]
+    [InlineData("""{"node_id":"1","input_name":"cfg","type":1}""")]
+    [InlineData("""{"node_id":"1","input_name":"cfg"}""")]
+    [InlineData("""{"input_name":"cfg","type":"number"}""")]
+    public async Task InvalidMappingArgumentsReturnRecoverableErrorsBeforeWriting(string mapping)
+    {
+        using var toolFactory = new ComfyWorkflowMcpApplicationFactory();
+        using var toolClient = toolFactory.CreateClient();
+        var response = await SendToolAsync(toolClient, "workflow_parameterize", new JsonObject
+        {
+            ["workflow_id"] = "test_image",
+            ["parameters"] = new JsonObject { ["cfg"] = JsonNode.Parse(mapping) }
+        });
+        Assert.False(StructuredContent(response)["success"]!.GetValue<bool>(), mapping);
+        AssertToolFailure(response, "invalid_arguments");
+        var workflow = await CallStructuredAsync(toolClient, "workflow_get", new JsonObject { ["workflow_id"] = "test_image" });
+        Assert.Equal(7, workflow["workflow"]!["1"]!["inputs"]!["cfg"]!.GetValue<double>());
+    }
+
+    [Fact]
+    public async Task WorkflowOptionsReturnEveryDistinctNodeAndInputBinding()
+    {
+        using var toolFactory = new ComfyWorkflowMcpApplicationFactory();
+        using var toolClient = toolFactory.CreateClient();
+        var workflows = toolFactory.Services.GetRequiredService<WorkflowManager>();
+        var workflow = workflows.Load("test_image")!;
+        workflow["7:2"] = JsonNode.Parse("""{"class_type":"Text","inputs":{"text":"First PARAM_PROMPT then PARAM_PROMPT"}}""");
+        workflow["8"] = JsonNode.Parse("""{"class_type":"Text","inputs":{"text":"PARAM_PROMPT"}}""");
+        await File.WriteAllTextAsync(Path.Combine(workflows.DirectoryPath, "test_image.json"), workflow.ToJsonString(), TestContext.Current.CancellationToken);
+
+        var options = await CallStructuredAsync(toolClient, "workflow_get_options", new JsonObject { ["workflow_id"] = "test_image" });
+
+        var bindings = options["parameters"]!["prompt"]!["bindings"]!.AsArray();
+        Assert.Equal(3, bindings.Count);
+        Assert.Contains(bindings, binding => binding!["node_id"]!.ToString() == "1" && binding["input_name"]!.ToString() == "prompt");
+        Assert.Contains(bindings, binding => binding!["node_id"]!.ToString() == "7:2" && binding["input_name"]!.ToString() == "text");
+        Assert.Contains(bindings, binding => binding!["node_id"]!.ToString() == "8" && binding["input_name"]!.ToString() == "text");
+    }
+
+    [Theory]
+    [InlineData("workflow_get", """{"workflow_id":"missing"}""", "workflow_not_found")]
+    [InlineData("generate_image", """{"workflow_id":"missing","prompt":"hello"}""", "workflow_not_found")]
+    [InlineData("workflow_configure", """{"workflow_id":"test_image","media_type":"other"}""", "invalid_media_type")]
+    [InlineData("asset_view", """{"filename":"missing.png"}""", "asset_not_found")]
+    public async Task ReadMutationAndGenerationFailuresShareOneErrorShape(string tool, string arguments, string code)
+    {
+        var response = await SendToolAsync(_client, tool, JsonNode.Parse(arguments)!.AsObject());
+        AssertToolFailure(response, code);
+    }
+
+    [Fact]
+    public async Task MissingAndInvalidDefaultsProvideParameterAndRecoveryStep()
+    {
+        using var toolFactory = new ComfyWorkflowMcpApplicationFactory();
+        using var toolClient = toolFactory.CreateClient();
+        await CallStructuredAsync(toolClient, "workflow_parameterize", JsonNode.Parse("""{"workflow_id":"test_image","parameters":{"cfg":{"node_id":"1","input_name":"cfg","type":"number"}}}""")!.AsObject());
+        var arguments = new JsonObject { ["workflow_id"] = "test_image", ["parameter_names"] = new JsonArray("cfg") };
+        var missing = await SendToolAsync(toolClient, "workflow_unparameterize", arguments);
+        AssertToolFailure(missing, "missing_default");
+        Assert.Equal("cfg", StructuredContent(missing)["parameter"]!.ToString());
+        Assert.Equal("Set defaults.cfg with workflow_configure.", StructuredContent(missing)["next_step"]!.ToString());
+        var generation = await SendToolAsync(toolClient, "generate_image", new JsonObject { ["workflow_id"] = "test_image", ["prompt"] = "hello" });
+        AssertToolFailure(generation, "missing_default");
+
+        await CallStructuredAsync(toolClient, "workflow_configure", JsonNode.Parse("""{"workflow_id":"test_image","defaults":{"cfg":"bad"}}""")!.AsObject());
+        var invalid = await SendToolAsync(toolClient, "workflow_unparameterize", arguments);
+        AssertToolFailure(invalid, "invalid_default");
+        Assert.Equal("cfg", StructuredContent(invalid)["parameter"]!.ToString());
+    }
+
+    [Fact]
+    public async Task CancellingAnUnknownJobReturnsTheCommonErrorShape()
+    {
+        await using var comfyUi = new FakeComfyUiServer();
+        await comfyUi.StartAsync(TestContext.Current.CancellationToken);
+        using var toolFactory = new ComfyWorkflowMcpApplicationFactory(comfyUi.BaseUrl);
+        using var toolClient = toolFactory.CreateClient();
+
+        var response = await SendToolAsync(toolClient, "comfy_job_cancel", new JsonObject { ["prompt_id"] = "missing" });
+
+        AssertToolFailure(response, "job_not_found");
+        Assert.Equal("prompt_id", StructuredContent(response)["parameter"]!.ToString());
+    }
+
+    [Fact]
+    public async Task GenerationValidationKeepsAllowedValuesInStructuredErrors()
+    {
+        var response = await SendToolAsync(_client, "generate_image", new JsonObject { ["workflow_id"] = "test_image", ["prompt"] = "unsupported" });
+        AssertToolFailure(response, "invalid_value");
+        var error = StructuredContent(response);
+        Assert.Equal("prompt", error["parameter"]!.ToString());
+        Assert.Equal(2, error["allowed_values"]!.AsArray().Count);
+    }
+
+    [Fact]
+    public async Task GenerationDescriptionsExplainBothCompletionModes()
+    {
+        var response = await SendMcpAsync("""{"jsonrpc":"2.0","id":51,"method":"tools/list","params":{}}""");
+        var tools = response["result"]!["tools"]!.AsArray();
+        foreach (var name in new[] { "generate_image", "generate_audio", "generate_video" })
+        {
+            var tool = tools.Single(item => item!["name"]!.ToString() == name)!;
+            Assert.Contains("wait_for_completion=false returns a prompt ID without media", tool["description"]!.ToString());
+            Assert.Contains("True waits for media; false returns a prompt ID", tool["inputSchema"]!["properties"]!["wait_for_completion"]!["description"]!.ToString());
+        }
+    }
+
+    [Fact]
     public async Task SetupTeachesClientsHowToDiscoverAndParameterizeNodes()
     {
         var toolsResponse = await SendMcpAsync(
@@ -413,8 +559,8 @@ public sealed class McpServerIntegrationTests(ComfyWorkflowMcpApplicationFactory
         Assert.Empty(setup["inputSchema"]!["properties"]!.AsObject());
         var parameterize = toolsResponse["result"]!["tools"]!.AsArray()
             .Single(tool => tool!["name"]!.ToString() == "workflow_parameterize")!;
-        Assert.Contains("exact top-level JSON key",
-            parameterize["inputSchema"]!["properties"]!["parameters"]!["description"]!.ToString());
+        Assert.Contains("Exact top-level node ID",
+            parameterize["inputSchema"]!["properties"]!["parameters"]!["additionalProperties"]!["properties"]!["node_id"]!["description"]!.ToString());
 
         var statusResponse = await SendMcpAsync(
             """{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"setup","arguments":{}}}""");
@@ -430,6 +576,27 @@ public sealed class McpServerIntegrationTests(ComfyWorkflowMcpApplicationFactory
     }
 
     private Task<JsonObject> SendMcpAsync(string json) => SendMcpAsync(_client, json);
+
+    private static void AssertToolFailure(JsonObject response, string code)
+    {
+        Assert.True(response["result"]?["isError"]?.GetValue<bool>() ?? false, response.ToJsonString());
+        var error = StructuredContent(response);
+        Assert.False(error["success"]!.GetValue<bool>());
+        Assert.Equal(code, error["error"]!.ToString());
+        Assert.NotEmpty(error["message"]!.ToString());
+        Assert.NotEmpty(error["next_step"]!.ToString());
+        var text = response["result"]!["content"]![0]!["text"]!.ToString();
+        Assert.Equal(code, JsonNode.Parse(text)!["error"]!.ToString());
+    }
+
+    private static Task<JsonObject> SendToolAsync(HttpClient client, string tool, JsonObject arguments) =>
+        SendMcpAsync(client, new JsonObject
+        {
+            ["jsonrpc"] = "2.0",
+            ["id"] = 52,
+            ["method"] = "tools/call",
+            ["params"] = new JsonObject { ["name"] = tool, ["arguments"] = arguments.DeepClone() }
+        }.ToJsonString());
 
     private static async Task<JsonObject> CallStructuredAsync(HttpClient client, string tool, JsonObject arguments) =>
         StructuredContent(await SendMcpAsync(client, new JsonObject
