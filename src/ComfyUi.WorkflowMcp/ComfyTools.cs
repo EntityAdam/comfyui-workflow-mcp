@@ -16,17 +16,18 @@ public sealed class ComfyTools(
     GeneratedMediaStore generatedMedia,
     MediaAssetStore mediaAssets)
 {
-    [McpServerTool(Name = "setup"), Description("Inspect and configure API-format ComfyUI workflows. Start with status for parsing and parameterization guidance. A workflow JSON is an object keyed by node ID; each node has class_type and inputs. Look in inputs for editable literal values such as cfg, steps, width, height, prompt, and negative/negative_prompt. Arrays like [\"node-id\", 0] are connections, not literal values. Use parameterize_workflow with workflow_id and a parameters object whose keys are public parameter names and whose values contain the exact node_id, input_name, and type.")]
+    [McpServerTool(Name = "setup"), Description("Inspect and configure API-format ComfyUI workflows. Start with status for parsing and parameterization guidance. A workflow JSON is an object keyed by node ID; each node has class_type and inputs. Look in inputs for editable literal values such as cfg, steps, width, height, prompt, and negative/negative_prompt. Arrays like [\"node-id\", 0] are connections, not literal values. Setup updates are additive: send only changed mappings, defaults, allowed_values, or constraints; omitted entries remain unchanged. Use null entries to remove configuration, or unparameterize_workflow to restore current defaults as literals. Use parameterize_workflow with workflow_id and a parameters object whose keys are public parameter names and whose values contain the exact node_id, input_name, and type.")]
     public object Setup(
-        [Description("Operation: status (returns paths plus a parameterization guide), configure_workflow, parameterize_workflow, or set_default_workflow.")] string operation = "status",
+        [Description("Operation: status (returns paths plus a parameterization guide), configure_workflow (merge configuration), parameterize_workflow (add bindings), unparameterize_workflow (restore selected defaults as literals), or set_default_workflow.")] string operation = "status",
         [Description("Workflow JSON filename without .json. Required except for status.")] string? workflow_id = null,
         [Description("image, audio, or video.")] string? media_type = null,
         [Description("For configure_workflow: default completion behavior for this workflow. Omit to preserve its existing value; absent YAML defaults to true.")] bool? wait_for_completion = null,
         [Description("For parameterize_workflow: additive mappings keyed by desired public parameter name. Existing PARAM_* bindings remain unchanged; supply only new or targeted bindings. Each value requires node_id (exact top-level JSON key, including colons), input_name (exact key under that node's inputs), and type: string, integer, number, or boolean. Example: {\"steps\":{\"node_id\":\"3\",\"input_name\":\"steps\",\"type\":\"integer\"}}.")] JsonObject? parameters = null,
-        JsonObject? defaults = null,
-        JsonObject? allowed_values = null,
-        [Description("Per-parameter validation including minimum, maximum, and pattern.")] JsonObject? constraints = null,
-        [Description("For configure_workflow: optional workflow description. Omit to preserve it; pass an empty string to remove it.")] string? description = null)
+        [Description("For configure_workflow: additive defaults keyed by parameter name. Send only new or changed entries; omitted entries are preserved. A null entry removes that default while keeping its parameterization. An empty object changes nothing.")] JsonObject? defaults = null,
+        [Description("For configure_workflow: additive allowed-value lists keyed by parameter name. Each supplied list replaces only that parameter's list; omitted entries are preserved. A null entry removes the list.")] JsonObject? allowed_values = null,
+        [Description("For configure_workflow: additive validation constraints keyed by parameter name, then rule (minimum, maximum, pattern, required). Omitted parameters and rules are preserved. A null parameter removes all its constraints; a null rule removes only that rule.")] JsonObject? constraints = null,
+        [Description("For configure_workflow: optional workflow description. Omit to preserve it; pass an empty string to remove it.")] string? description = null,
+        [Description("For unparameterize_workflow: parameter names to remove, such as [\"cfg\"]. Restore every selected binding to its current YAML default and remove its defaults, allowed_values, and constraints. A valid scalar default is required for each name; validation failures leave files unchanged.")] string[]? parameter_names = null)
     {
         try
         {
@@ -47,6 +48,11 @@ public sealed class ComfyTools(
                 {
                     success = true,
                     path = workflowConfiguration.SetDefaultWorkflow(Required(media_type, nameof(media_type)), Required(workflow_id, nameof(workflow_id)), workflows)
+                },
+                "unparameterize_workflow" => new
+                {
+                    success = true,
+                    path = workflowConfiguration.UnparameterizeWorkflow(Required(workflow_id, nameof(workflow_id)), parameter_names ?? throw new ArgumentException("parameter_names is required."), workflows)
                 },
                 _ => throw new ArgumentException($"Unsupported setup operation '{operation}'.")
             };
@@ -392,7 +398,7 @@ public sealed class ComfyTools(
         var parameters = workflows.ExtractParameters(workflow);
         foreach (var configured in new[] { defaults, allowedValues, constraints }
                      .Where(value => value is not null)
-                     .SelectMany(value => value!.Select(pair => pair.Key))
+                     .SelectMany(value => value!.Where(pair => pair.Value is not null).Select(pair => pair.Key))
                      .Distinct(StringComparer.Ordinal))
             if (!parameters.ContainsKey(configured))
                 throw new ArgumentException($"Workflow '{workflowId}' has no parameter '{configured}'.");

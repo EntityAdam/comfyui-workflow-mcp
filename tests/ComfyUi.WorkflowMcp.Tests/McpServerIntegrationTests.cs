@@ -65,6 +65,54 @@ public sealed class McpServerIntegrationTests(ComfyWorkflowMcpApplicationFactory
     }
 
     [Fact]
+    public async Task SetupSupportsIncrementalConfigurationAndRestoringDefaults()
+    {
+        using var toolFactory = new ComfyWorkflowMcpApplicationFactory();
+        using var toolClient = toolFactory.CreateClient();
+        async Task<JsonObject> Call(string name, JsonObject arguments)
+        {
+            var response = await SendMcpAsync(toolClient, new JsonObject
+            {
+                ["jsonrpc"] = "2.0",
+                ["id"] = 40,
+                ["method"] = "tools/call",
+                ["params"] = new JsonObject { ["name"] = name, ["arguments"] = arguments }
+            }.ToJsonString());
+            return StructuredContent(response);
+        }
+        async Task Setup(string arguments)
+        {
+            var values = JsonNode.Parse(arguments)!.AsObject();
+            values["workflow_id"] = "test_image";
+            var result = await Call("setup", values);
+            Assert.True(result["success"]!.GetValue<bool>(), result.ToJsonString());
+        }
+
+        await Setup("""{"operation":"parameterize_workflow","parameters":{"aspect_ratio":{"node_id":"1","input_name":"aspect_ratio","type":"string"}}}""");
+        await Setup("""{"operation":"configure_workflow","defaults":{"prompt":"hello","aspect_ratio":"16:9"}}""");
+        await Setup("""{"operation":"parameterize_workflow","parameters":{"cfg":{"node_id":"1","input_name":"cfg","type":"number"}}}""");
+        await Setup("""{"operation":"configure_workflow","defaults":{"cfg":8.5}}""");
+
+        var options = await Call("workflow_get_options", new JsonObject { ["workflow_id"] = "test_image" });
+        Assert.Equal("hello", options["defaults"]!["prompt"]!.ToString());
+        Assert.Equal("16:9", options["defaults"]!["aspect_ratio"]!.ToString());
+        Assert.Equal("8.5", options["defaults"]!["cfg"]!.ToString());
+
+        await Setup("""{"operation":"unparameterize_workflow","parameter_names":["cfg"]}""");
+        options = await Call("workflow_get_options", new JsonObject { ["workflow_id"] = "test_image" });
+        Assert.False(options["defaults"]!.AsObject().ContainsKey("cfg"));
+        Assert.False(options["parameters"]!.AsObject().ContainsKey("cfg"));
+        Assert.Equal("hello", options["defaults"]!["prompt"]!.ToString());
+        var workflow = await Call("workflow_get", new JsonObject { ["workflow_id"] = "test_image" });
+        Assert.Equal(8.5, workflow["workflow"]!["1"]!["inputs"]!["cfg"]!.GetValue<double>());
+
+        await Setup("""{"operation":"configure_workflow","defaults":{"aspect_ratio":null}}""");
+        options = await Call("workflow_get_options", new JsonObject { ["workflow_id"] = "test_image" });
+        Assert.False(options["defaults"]!.AsObject().ContainsKey("aspect_ratio"));
+        Assert.True(options["parameters"]!.AsObject().ContainsKey("aspect_ratio"));
+    }
+
+    [Fact]
     public async Task WorkflowListReturnsConfiguredYamlDescription()
     {
         using var toolFactory = new ComfyWorkflowMcpApplicationFactory();

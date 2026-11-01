@@ -72,6 +72,14 @@ The package does not include workflow or YAML files. During setup, the agent can
 Source workflow files may be edited directly. They are expected to be copies
 exported from ComfyUI and do not require version-preserving transformations.
 
+Setup updates are additive: send only new or changed parameter bindings and
+YAML configuration entries. Existing defaults and validation rules are
+preserved unless explicitly updated or removed with `null`.
+`setup(operation: "unparameterize_workflow", workflow_id: "portrait", parameter_names: ["cfg"])`
+restores the selected parameter's current YAML default as a fixed workflow input
+and removes its configuration. See [configuration](docs/configuration.md#incremental-yaml-configuration)
+for update and removal examples.
+
 ## Tools
 
 ### Generation

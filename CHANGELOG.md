@@ -4,6 +4,9 @@
 
 ### Changed
 
+- Setup YAML updates merge defaults and allowed-value lists by parameter and
+  constraints by rule; omitted entries are preserved, and null entries remove
+  specific configuration. Tool descriptions explain incremental updates.
 - `asset_list()` now omits files without recognized image, video, or audio
   extensions. AVI files are recognized as `video/x-msvideo`.
 - `setup()` now teaches clients how to parse ComfyUI API workflow JSON,
@@ -31,6 +34,9 @@
 
 ### Added
 
+- `setup(operation: "unparameterize_workflow", parameter_names: [...])`
+  restores selected bindings to their current YAML defaults and removes their
+  defaults, allowed values, and constraints after validating all selections.
 - Workflow YAML supports an optional `description`, editable through setup
   and returned by `workflow_list()` and `workflow_get_options()`.
 - `asset_view(filename)` returns images from `assets/` as standard MCP image

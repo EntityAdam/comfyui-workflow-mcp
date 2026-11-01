@@ -53,7 +53,8 @@ public sealed partial class WorkflowConfigurationManager(IConfiguration configur
                     "Record the exact top-level node ID and exact input key. Node IDs may contain colons.",
                     "Choose a stable public parameter name and the matching type: string, integer, number, or boolean.",
                     "Call setup with operation parameterize_workflow, the workflow_id, and only the mappings to add or change. Calls are additive: existing PARAM_* bindings remain in the JSON, and multiple parameters may also be submitted together.",
-                    "Call setup with configure_workflow to record media_type, defaults, allowed_values, and constraints in YAML. Then verify with workflow_get_options."
+                    "Call setup with configure_workflow to record media_type, defaults, allowed_values, and constraints in YAML. Updates merge by parameter name; send only new or changed entries, never repeat unchanged defaults. Constraint objects merge by rule name; arrays replace the named parameter's allowed values. A null entry removes that entry; omitted entries and empty objects preserve existing configuration. Then verify with workflow_get_options.",
+                    "To remove parameterization, call setup with operation unparameterize_workflow and parameter_names, for example [\"cfg\"]. Every binding is restored to the parameter's current YAML default, and its defaults, allowed_values, and constraints are removed. All selected parameters must have valid defaults; otherwise nothing is changed. To remove only a default while keeping its placeholder, use configure_workflow with defaults: {\"cfg\": null}."
                 },
                 parameterize_workflow_example = new
                 {
@@ -97,6 +98,13 @@ public sealed partial class WorkflowConfigurationManager(IConfiguration configur
     {
         var path = WorkflowConfigPath(workflowId);
         var document = LoadDocument(path);
+        // Preserve legacy model defaults when applying incremental updates.
+        if (document["model"] is { } legacyModel)
+        {
+            var existingDefaults = Object(document["defaults"]);
+            if (existingDefaults["model"] is null) existingDefaults["model"] = legacyModel.DeepClone();
+            document["defaults"] = existingDefaults;
+        }
         if (description is not null)
         {
             if (string.IsNullOrWhiteSpace(description)) document.Remove("description");
@@ -108,9 +116,9 @@ public sealed partial class WorkflowConfigurationManager(IConfiguration configur
             document["media_type"] = NormalizeMediaType(mediaType);
         if (waitForCompletion is not null)
             document["wait_for_completion"] = waitForCompletion.Value;
-        if (defaults is not null) document["defaults"] = defaults.DeepClone();
-        if (allowedValues is not null) document["allowed_values"] = allowedValues.DeepClone();
-        if (constraints is not null) document["constraints"] = constraints.DeepClone();
+        MergeSection(document, "defaults", defaults);
+        MergeSection(document, "allowed_values", allowedValues);
+        MergeSection(document, "constraints", constraints, recursive: true);
         SaveDocument(path, document);
         return path;
     }
@@ -138,6 +146,66 @@ public sealed partial class WorkflowConfigurationManager(IConfiguration configur
         var path = Path.Combine(workflows.DirectoryPath, SafeName(workflowId) + ".json");
         File.WriteAllText(path, workflow.ToJsonString(new() { WriteIndented = true }));
         return path;
+    }
+
+    public string UnparameterizeWorkflow(
+        string workflowId,
+        IReadOnlyList<string> parameterNames,
+        WorkflowManager workflows)
+    {
+        if (parameterNames.Count == 0)
+            throw new ArgumentException("parameter_names must contain at least one parameter.");
+        var workflow = workflows.Load(workflowId)
+            ?? throw new ArgumentException($"Workflow '{workflowId}' not found.");
+        var parameters = workflows.ExtractParameters(workflow);
+        var validation = Load(workflowId);
+        var names = parameterNames.Select(Normalize).Distinct(StringComparer.Ordinal).ToArray();
+        foreach (var name in names)
+        {
+            if (!parameters.TryGetValue(name, out var parameter))
+                throw new ArgumentException($"Workflow '{workflowId}' has no parameter '{name}'.");
+            var value = validation.Defaults[name] as JsonValue
+                ?? throw new ArgumentException($"Parameter '{name}' requires a scalar YAML default before removing parameterization. Set it with configure_workflow first.");
+            ValidateValue(name, value, validation);
+            WorkflowManager.RestoreParameterDefault(workflow, parameter, value);
+        }
+        var remaining = workflows.ExtractParameters(workflow);
+        if (names.Any(remaining.ContainsKey))
+            throw new ArgumentException("A selected default contains a parameter placeholder. Supply a literal default before removing parameterization.");
+
+        var configPath = WorkflowConfigPath(workflowId);
+        var document = LoadDocument(configPath);
+        foreach (var name in names)
+        {
+            foreach (var section in new[] { "defaults", "allowed_values", "constraints" })
+                if (document[section] is JsonObject values) values.Remove(name);
+            if (name == "model") document.Remove("model");
+        }
+        var path = Path.Combine(workflows.DirectoryPath, SafeName(workflowId) + ".json");
+        var originalWorkflow = File.ReadAllText(path);
+        // Validate all selected parameters before writing either file.
+        File.WriteAllText(path, workflow.ToJsonString(new() { WriteIndented = true }));
+        try { SaveDocument(configPath, document); }
+        catch
+        {
+            File.WriteAllText(path, originalWorkflow);
+            throw;
+        }
+        return path;
+    }
+
+    private static void MergeSection(JsonObject document, string name, JsonObject? changes, bool recursive = false)
+    {
+        if (changes is null || changes.Count == 0) return;
+        var values = Object(document[name]);
+        foreach (var (key, value) in changes)
+        {
+            if (value is null) values.Remove(key);
+            else if (recursive && value is JsonObject rules)
+                MergeSection(values, key, rules, recursive: true);
+            else values[key] = value.DeepClone();
+        }
+        document[name] = values;
     }
 
     public void ValidateValue(string name, JsonNode value, WorkflowValidation validation)

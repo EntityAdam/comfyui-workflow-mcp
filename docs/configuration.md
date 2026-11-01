@@ -187,3 +187,56 @@ Parameterization is additive. A call may add only `prompt`, followed later by a
 call that adds only `steps`; the existing prompt placeholder remains in the
 workflow JSON. A call changes only the explicitly targeted node inputs, so
 previous mappings do not need to be repeated.
+
+### Incremental YAML configuration
+
+`configure_workflow` is additive too. Send only new or changed entries in
+`defaults`, `allowed_values`, and `constraints`. Omitted entries and empty
+objects preserve existing values. A supplied default replaces that parameter's
+default; an allowed-values array replaces that parameter's entire list.
+Constraint objects merge by rule, so changing `maximum` preserves an existing
+`minimum`.
+
+For example, after setting prompt and aspect-ratio defaults in one turn, a
+later turn can add CFG without repeating those values:
+
+```json
+{
+  "operation": "configure_workflow",
+  "workflow_id": "portrait",
+  "defaults": { "cfg": 7.5 },
+  "constraints": { "cfg": { "minimum": 1, "maximum": 20 } }
+}
+```
+
+Use `null` to remove a specific entry. For example,
+`"defaults": { "cfg": null }` removes only the CFG default, retaining its
+placeholder. `"allowed_values": { "cfg": null }` removes its allowed-values
+list. `"constraints": { "cfg": { "maximum": null } }` removes only the
+maximum, whereas `"constraints": { "cfg": null }` removes all CFG constraints.
+
+### Remove parameterization and restore a default
+
+To make a parameter a fixed workflow input again, use:
+
+```json
+{
+  "operation": "unparameterize_workflow",
+  "workflow_id": "portrait",
+  "parameter_names": ["cfg"]
+}
+```
+
+This replaces every CFG binding with its **current YAML default**, preserving
+the input's type, and removes CFG from `defaults`, `allowed_values`, and
+`constraints`. Other parameters and their configuration remain unchanged.
+Embedded placeholders are replaced within their strings while preserving the
+surrounding text. The restored value is the current default, not the original
+value that existed before parameterization.
+
+Each selected parameter must exist and have a scalar default that matches its
+type and configured validation rules. Defaults containing parameter
+placeholders are rejected. If a default is missing, set it with
+`configure_workflow` first. All selected parameters are validated before either
+file is written, so an unknown parameter or invalid default leaves both files
+unchanged. Inspect the result with `workflow_get()` and `workflow_get_options()`.
